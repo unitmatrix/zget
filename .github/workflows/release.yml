@@ -1,0 +1,218 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  validate:
+    name: Validate release tag
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - name: Check out source
+        # actions/checkout v7.0.1
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+      - name: Match tag to project version
+        id: version
+        run: |
+          tag="${GITHUB_REF_NAME}"
+          if [[ ! "${tag}" =~ ^v([0-9]+\.[0-9]+\.[0-9]+)$ ]]; then
+            echo "Release tags must use the form vMAJOR.MINOR.PATCH." >&2
+            exit 1
+          fi
+
+          tag_version="${BASH_REMATCH[1]}"
+          project_version="$(sed -nE 's/^project\(zget VERSION ([0-9]+\.[0-9]+\.[0-9]+).*/\1/p' CMakeLists.txt)"
+          header_version="$(awk '
+            $2 == "ZGET_VERSION_MAJOR" { major = $3 }
+            $2 == "ZGET_VERSION_MINOR" { minor = $3 }
+            $2 == "ZGET_VERSION_PATCH" { patch = $3 }
+            END { print major "." minor "." patch }
+          ' include/zget.h)"
+          if [[ "${tag_version}" != "${project_version}" ||
+                "${tag_version}" != "${header_version}" ]]; then
+            echo "Tag ${tag}, CMake ${project_version}, and header ${header_version} must match." >&2
+            exit 1
+          fi
+
+          echo "version=${tag_version}" >> "${GITHUB_OUTPUT}"
+
+  build:
+    name: Build / ${{ matrix.platform }}
+    needs: validate
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux-x86_64
+            runner: ubuntu-24.04
+            compiler: gcc
+            libc: glibc
+            build_dir: build
+          - platform: linux-arm64
+            runner: ubuntu-24.04-arm
+            compiler: gcc
+            libc: glibc
+            build_dir: build
+          - platform: macos-arm64
+            runner: macos-15
+            compiler: clang
+            libc: system
+            build_dir: build
+          - platform: macos-x86_64
+            runner: macos-15-intel
+            compiler: clang
+            libc: system
+            build_dir: build
+    steps:
+      - name: Check out source
+        # actions/checkout v7.0.1
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - name: Install Linux dependencies
+        if: matrix.libc == 'glibc'
+        run: sudo apt-get update && sudo apt-get install -y libcurl4-openssl-dev zlib1g-dev
+      - name: Configure
+        env:
+          CC: ${{ matrix.compiler }}
+        run: |
+          platform_options=()
+          if [[ "${RUNNER_OS}" == "macOS" ]]; then
+            platform_options+=("-DCMAKE_OSX_DEPLOYMENT_TARGET=13.0")
+          fi
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release "${platform_options[@]}"
+      - name: Build
+        run: cmake --build build --parallel 2
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+      - name: Verify version
+        run: |
+          expected="zget ${{ needs.validate.outputs.version }}"
+          actual="$(build/zget --version)"
+          if [[ "${actual}" != "${expected}" ]]; then
+            echo "Expected '${expected}', but the executable reports '${actual}'." >&2
+            exit 1
+          fi
+      - name: Verify CLI linkage
+        run: |
+          # The CLI contains libzget itself, but intentionally continues to use
+          # platform curl, zlib, TLS, and C runtime libraries dynamically.
+          if [[ "${RUNNER_OS}" == "Linux" ]]; then
+            ldd build/zget
+            if ldd build/zget | grep -q 'libzget'; then
+              echo "The release CLI unexpectedly depends on shared libzget." >&2
+              exit 1
+            fi
+          else
+            otool -L build/zget
+            if otool -L build/zget | grep -q 'libzget'; then
+              echo "The release CLI unexpectedly depends on shared libzget." >&2
+              exit 1
+            fi
+          fi
+      - name: Package
+        run: |
+          package="zget-${{ needs.validate.outputs.version }}-${{ matrix.platform }}"
+          mkdir -p "dist/${package}"
+          cp "${{ matrix.build_dir }}/zget" "${{ matrix.build_dir }}/zget.1" \
+            README.md LICENSE "dist/${package}/"
+          tar -C dist -czf "dist/${package}.tar.gz" "${package}"
+      - name: Upload package
+        # actions/upload-artifact v7.0.1
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: ${{ matrix.platform }}
+          path: dist/*.tar.gz
+          if-no-files-found: error
+
+  publish:
+    name: Publish GitHub release
+    needs: [validate, build]
+    runs-on: ubuntu-24.04
+    permissions:
+      attestations: write
+      contents: write
+      id-token: write
+    steps:
+      - name: Download packages
+        # actions/download-artifact v8.0.1
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          path: artifacts
+          merge-multiple: true
+      - name: Create checksums
+        working-directory: artifacts
+        run: sha256sum zget-*.tar.gz > SHA256SUMS
+      - name: Attest release artifacts
+        # actions/attest v4.2.2
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6
+        with:
+          subject-path: artifacts/*
+      - name: Write release notes
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.validate.outputs.version }}
+        run: |
+          tag="${GITHUB_REF_NAME}"
+          repository="${GITHUB_REPOSITORY}"
+          release_base="https://github.com/${repository}/releases/download/${tag}"
+          previous_tag="$(gh api "repos/${repository}/releases?per_page=100" \
+            --jq '[.[] | select(.draft == false and .prerelease == false) | .tag_name][0] // empty')"
+          generated_notes="$(gh api --method POST "repos/${repository}/releases/generate-notes" \
+            -f tag_name="${tag}" --jq '.body')"
+
+          {
+            echo "## Downloads"
+            echo
+            echo "- [Linux x86_64](${release_base}/zget-${VERSION}-linux-x86_64.tar.gz)"
+            echo "- [Linux ARM64](${release_base}/zget-${VERSION}-linux-arm64.tar.gz)"
+            echo "- [macOS Apple Silicon](${release_base}/zget-${VERSION}-macos-arm64.tar.gz)"
+            echo "- [macOS Intel](${release_base}/zget-${VERSION}-macos-x86_64.tar.gz)"
+            echo "- [SHA-256 checksums](${release_base}/SHA256SUMS)"
+            echo
+            echo "The CLI includes libzget statically and uses the platform curl, zlib, TLS, and C runtime libraries."
+            echo "The macOS builds target macOS 13 or later; glibc builds use the Ubuntu 24.04 runtime baseline."
+            echo
+            echo "## Changelog"
+            echo
+            if [[ -n "${previous_tag}" ]]; then
+              echo "[View all changes since ${previous_tag}](https://github.com/${repository}/compare/${previous_tag}...${tag})"
+            else
+              echo "[View commit history for ${tag}](https://github.com/${repository}/commits/${tag})"
+            fi
+            echo
+            echo "## Release notes"
+            echo
+            printf '%s\n' "${generated_notes}"
+          } > release-notes.md
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.validate.outputs.version }}
+        run: |
+          # Keep a failed or partial asset upload out of the public release list.
+          gh release create "${GITHUB_REF_NAME}" artifacts/* \
+            --repo "${GITHUB_REPOSITORY}" \
+            --verify-tag \
+            --draft \
+            --title "zget ${VERSION}" \
+            --notes-file release-notes.md
+          gh release edit "${GITHUB_REF_NAME}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --draft=false

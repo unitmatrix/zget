@@ -1,0 +1,15 @@
+/build*/
+/stage/
+/.cache/
+compile_commands.json
+*.o
+*.a
+*.so
+*.so.*
+*.dylib
+*.profraw
+*.profdata
+fuzz-*.log
+__pycache__/
+*.pyc
+.*.zget.tmp.*
