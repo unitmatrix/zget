@@ -8,7 +8,7 @@ permissions:
   contents: read
 
 jobs:
-  build:
+  linux:
     name: Linux / ${{ matrix.architecture }} / ${{ matrix.compiler }}
     runs-on: ${{ matrix.runner }}
     strategy:
