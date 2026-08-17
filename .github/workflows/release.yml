@@ -24,8 +24,7 @@ jobs:
       version: ${{ steps.version.outputs.version }}
     steps:
       - name: Check out source
-        # actions/checkout v7.0.1
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
       - name: Match tag to project version
@@ -83,8 +82,7 @@ jobs:
             build_dir: build
     steps:
       - name: Check out source
-        # actions/checkout v7.0.1
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install Linux dependencies
         if: matrix.libc == 'glibc'
         run: sudo apt-get update && sudo apt-get install -y libcurl4-openssl-dev zlib1g-dev

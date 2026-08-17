@@ -28,8 +28,7 @@ jobs:
             runner: ubuntu-24.04-arm
     steps:
       - name: Check out source
-        # actions/checkout v4.2.2
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install dependencies
         run: |
           sudo apt-get update
@@ -82,8 +81,7 @@ jobs:
             runner: macos-15-intel
     steps:
       - name: Check out source
-        # actions/checkout v4.2.2
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Configure
         env:
           CC: clang
@@ -98,8 +96,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - name: Check out source
-        # actions/checkout v4.2.2
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install dependencies
         run: sudo apt-get update && sudo apt-get install -y clang libcurl4-openssl-dev zlib1g-dev
       - name: Configure
@@ -119,8 +116,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - name: Check out source
-        # actions/checkout v4.2.2
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install dependencies
         run: sudo apt-get update && sudo apt-get install -y clang libcurl4-openssl-dev zlib1g-dev
       - name: Configure and build fuzzers
