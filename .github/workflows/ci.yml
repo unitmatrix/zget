@@ -1,0 +1,132 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Linux / ${{ matrix.architecture }} / ${{ matrix.compiler }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - architecture: x86_64
+            compiler: gcc
+            runner: ubuntu-24.04
+          - architecture: x86_64
+            compiler: clang
+            runner: ubuntu-24.04
+          - architecture: arm64
+            compiler: gcc
+            runner: ubuntu-24.04-arm
+    steps:
+      - name: Check out source
+        # actions/checkout v4.2.2
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libcurl4-openssl-dev pkg-config zlib1g-dev
+      - name: Configure
+        env:
+          CC: ${{ matrix.compiler }}
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr
+      - name: Build
+        run: cmake --build build --parallel 2
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+      - name: Verify staged install
+        if: matrix.architecture == 'x86_64' && matrix.compiler == 'gcc'
+        env:
+          DESTDIR: ${{ github.workspace }}/stage
+        run: |
+          cmake --install build
+          test -x stage/usr/bin/zget
+          test -f stage/usr/include/zget.h
+          test -f stage/usr/share/man/man1/zget.1
+          test -f stage/usr/share/licenses/zget/LICENSE
+
+          project_version="$(
+            sed -nE 's/^project\(zget VERSION ([0-9]+\.[0-9]+\.[0-9]+).*/\1/p' CMakeLists.txt
+          )"
+          abi_version="${project_version%%.*}"
+          library="$(find stage/usr -type f -name "libzget.so.${project_version}" -print -quit)"
+          pc_file="$(find stage/usr -type f -path '*/pkgconfig/libzget.pc' -print -quit)"
+          test -n "${library}"
+          test -n "${pc_file}"
+          test -L "$(dirname "${library}")/libzget.so"
+          test -L "$(dirname "${library}")/libzget.so.${abi_version}"
+          readelf -d "${library}" | grep -Eq "\\(SONAME\\).*\\[libzget\\.so\\.${abi_version}\\]"
+          pc_dir="$(dirname "${pc_file}")"
+          PKG_CONFIG_PATH="${pc_dir}" pkg-config --validate libzget
+          installed_version="$(PKG_CONFIG_PATH="${pc_dir}" pkg-config --modversion libzget)"
+          test "${installed_version}" = "${project_version}"
+
+  macos:
+    name: macOS / ${{ matrix.architecture }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - architecture: arm64
+            runner: macos-15
+          - architecture: x86_64
+            runner: macos-15-intel
+    steps:
+      - name: Check out source
+        # actions/checkout v4.2.2
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - name: Configure
+        env:
+          CC: clang
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_DEPLOYMENT_TARGET=13.0
+      - name: Build
+        run: cmake --build build --parallel 2
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+
+  sanitizers:
+    name: ASan + UBSan
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out source
+        # actions/checkout v4.2.2
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y clang libcurl4-openssl-dev zlib1g-dev
+      - name: Configure
+        env:
+          CC: clang
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DZGET_ENABLE_SANITIZERS=ON
+      - name: Build
+        run: cmake --build build --parallel 2
+      - name: Test
+        env:
+          ASAN_OPTIONS: detect_leaks=1:strict_string_checks=1
+          UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
+        run: ctest --test-dir build --output-on-failure
+
+  fuzz-smoke:
+    name: Parser fuzz smoke
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out source
+        # actions/checkout v4.2.2
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y clang libcurl4-openssl-dev zlib1g-dev
+      - name: Configure and build fuzzers
+        env:
+          CC: clang
+        run: cmake -S . -B build -DBUILD_TESTING=OFF -DZGET_BUILD_FUZZERS=ON && cmake --build build --parallel 2
+      - name: Smoke-test parsers
+        run: |
+          for target in fuzz_eocd fuzz_cd fuzz_cd_stream fuzz_zip64_extra fuzz_local; do
+            "build/$target" -runs=1000
+          done
