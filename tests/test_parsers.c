@@ -70,6 +70,20 @@ static void test_utf8(void)
     CHECK(!zget_valid_utf8(bad, sizeof(bad)));
 }
 
+/* Verify strict Content-Range grammar acceptance and rejection of near-misses. */
+static void test_content_range(void)
+{
+    uint64_t start, end, total;
+    CHECK(zget_parse_content_range("bytes 0-99/100", &start, &end, &total));
+    CHECK(start == 0 && end == 99 && total == 100);
+    /* A leading sign is valid strtoumax input but not valid HTTP grammar. */
+    CHECK(!zget_parse_content_range("bytes +0-99/100", &start, &end, &total));
+    /* Trailing bytes after a well-formed field must not be silently ignored. */
+    CHECK(!zget_parse_content_range("bytes 0-99/100 ", &start, &end, &total));
+    CHECK(!zget_parse_content_range("bytes 0-99/", &start, &end, &total));
+    CHECK(!zget_parse_content_range("", &start, &end, &total));
+}
+
 /* Verify Central Directory parsing across every callback chunk granularity. */
 static void test_streaming_cd(void)
 {
@@ -90,6 +104,7 @@ static void test_streaming_cd(void)
 int main(void)
 {
     test_arithmetic(); test_eocd(); test_zip64_extra(); test_utf8();
+    test_content_range();
     test_streaming_cd();
     return failures != 0;
 }

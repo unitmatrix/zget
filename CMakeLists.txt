@@ -104,7 +104,7 @@ if(ZGET_BUILD_FUZZERS)
     if(NOT ZGET_HAVE_LIBFUZZER)
         message(FATAL_ERROR "The selected Clang does not provide a libFuzzer runtime")
     endif()
-    foreach(parser IN ITEMS eocd cd cd_stream zip64_extra local)
+    foreach(parser IN ITEMS eocd cd cd_stream zip64_extra local content_range)
         add_executable(fuzz_${parser} fuzz/fuzz_${parser}.c
             $<TARGET_OBJECTS:zget_parser_objects>)
         target_include_directories(fuzz_${parser} PRIVATE include src)
