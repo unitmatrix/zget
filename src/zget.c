@@ -76,7 +76,6 @@ int zget_open_url_ex(const char *archive_url, const zget_options *options,
         rc = ZGET_EHTTP;
         goto fail;
     }
-    ctx->curl_global_initialized = true;
     if ((rc = zget_http_init(ctx)) != ZGET_OK)
         goto fail;
     /* ZIP consumes ranges through the source abstraction, never through curl. */
@@ -206,9 +205,15 @@ void zget_close(zget_ctx *ctx)
         return;
     if (ctx->curl != NULL)
         curl_easy_cleanup(ctx->curl);
-    /* libcurl reference-counts matching global init/cleanup acquisitions. */
-    if (ctx->curl_global_initialized)
-        curl_global_cleanup();
+    /*
+     * Do not call curl_global_cleanup() here. libcurl's global state belongs
+     * to the process, not to one zget context. A caller may have several
+     * contexts alive at once, and closing any one of them must not tear down
+     * state still needed by the others. The process will reclaim this small
+     * global allocation set on exit; avoiding cleanup is also the portable way
+     * to keep independent contexts safe without imposing a threading API on
+     * this C99 library.
+     */
     free(ctx->url);
     free(ctx->effective_url);
     free(ctx->strong_etag);

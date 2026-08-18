@@ -38,8 +38,6 @@ struct zget_ctx {
     uint64_t cd_size;
     uint64_t entry_count;
     uint64_t http_requests;
-    /* Pair the process-global curl acquisition even when open fails partway. */
-    bool curl_global_initialized;
     bool ready;
     zget_options options;
     struct zget_source source;
