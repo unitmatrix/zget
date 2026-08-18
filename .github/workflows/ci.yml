@@ -68,6 +68,15 @@ jobs:
           installed_version="$(PKG_CONFIG_PATH="${pc_dir}" pkg-config --modversion libzget)"
           test "${installed_version}" = "${project_version}"
 
+          cmake -S tests/package -B package-build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_PREFIX_PATH="${GITHUB_WORKSPACE}/stage/usr"
+          cmake --build package-build --parallel 2
+          test "$(package-build/consumer_static)" = "${project_version}"
+          shared_version="$(LD_LIBRARY_PATH="$(dirname "${library}")" \
+            package-build/consumer)"
+          test "${shared_version}" = "${project_version}"
+
   macos:
     name: macOS / ${{ matrix.architecture }}
     runs-on: ${{ matrix.runner }}
