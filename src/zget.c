@@ -245,5 +245,5 @@ const char *zget_error_string(int error)
 
 const char *zget_version(void)
 {
-    return "0.1.0";
+    return ZGET_VERSION_STRING;
 }

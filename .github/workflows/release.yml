@@ -37,16 +37,9 @@ jobs:
           fi
 
           tag_version="${BASH_REMATCH[1]}"
-          project_version="$(sed -nE 's/^project\(zget VERSION ([0-9]+\.[0-9]+\.[0-9]+).*/\1/p' CMakeLists.txt)"
-          header_version="$(awk '
-            $2 == "ZGET_VERSION_MAJOR" { major = $3 }
-            $2 == "ZGET_VERSION_MINOR" { minor = $3 }
-            $2 == "ZGET_VERSION_PATCH" { patch = $3 }
-            END { print major "." minor "." patch }
-          ' include/zget.h)"
-          if [[ "${tag_version}" != "${project_version}" ||
-                "${tag_version}" != "${header_version}" ]]; then
-            echo "Tag ${tag}, CMake ${project_version}, and header ${header_version} must match." >&2
+          project_version="$(cat VERSION)"
+          if [[ "${tag_version}" != "${project_version}" ]]; then
+            echo "Tag ${tag} and VERSION ${project_version} must match." >&2
             exit 1
           fi
 

@@ -428,7 +428,7 @@ int zget_http_init(struct zget_ctx *ctx)
     SETOPT(CURLOPT_REDIR_PROTOCOLS_STR, https ? "https" : "http,https");
     SETOPT(CURLOPT_FAILONERROR, 0L);
     SETOPT(CURLOPT_NOSIGNAL, 1L);
-    SETOPT(CURLOPT_USERAGENT, "zget/0.1.0");
+    SETOPT(CURLOPT_USERAGENT, "zget/" ZGET_VERSION_STRING);
     return ZGET_OK;
 fail:
     zget_set_error(ctx, ZGET_EHTTP, "could not configure libcurl: %s",
