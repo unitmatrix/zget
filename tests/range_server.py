@@ -91,7 +91,15 @@ class RangeHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Range", content_range)
         self.send_header("Content-Length", str(len(part)))
         self.send_header("Accept-Ranges", "bytes")
-        self.send_header("ETag", type(self).etag)
+        # missing-etag/weak-etag only degrade the header after the first
+        # response, matching the point where a strong validator is on file
+        # and every later response must repeat it.
+        if type(self).mode == "missing-etag" and request_number > 1:
+            pass
+        elif type(self).mode == "weak-etag" and request_number > 1:
+            self.send_header("ETag", "W/" + type(self).etag)
+        else:
+            self.send_header("ETag", type(self).etag)
         if type(self).mode == "duplicate-etag":
             self.send_header("ETag", '"zget-test-v2"')
         if type(self).mode == "encoding":

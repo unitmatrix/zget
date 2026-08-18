@@ -217,6 +217,10 @@ def main(binary):
     # from the first response; mixing versions could combine unrelated bytes.
     expect_failure(data, mode="changed")
     expect_failure(data, mode="size-change")
+    # A strong ETag must be repeated exactly; a server that later drops or
+    # downgrades it must not be trusted just because the size still matches.
+    expect_failure(data, mode="missing-etag")
+    expect_failure(data, mode="weak-etag")
     for mode in ("403", "404", "416", "drop"):
         expect_failure(data, mode=mode)
     expect_failure(data, path="/redirect-loop")
