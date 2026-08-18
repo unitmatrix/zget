@@ -53,6 +53,9 @@ uint32_t zget_le32(const unsigned char *p);
 uint64_t zget_le64(const unsigned char *p);
 bool zget_valid_utf8(const unsigned char *s, size_t n);
 char *zget_strdup(const char *s);
+/* Pure Content-Range grammar parser; no libcurl dependency, fuzzable directly. */
+bool zget_parse_content_range(const char *value, uint64_t *start,
+                              uint64_t *end, uint64_t *total);
 
 int zget_http_init(struct zget_ctx *ctx);
 int zget_http_read(void *opaque, uint64_t offset, uint64_t length,
