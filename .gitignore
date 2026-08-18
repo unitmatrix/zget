@@ -1,5 +1,7 @@
 /build*/
 /stage/
+/stage-package/
+/package-build/
 /.cache/
 compile_commands.json
 *.o
