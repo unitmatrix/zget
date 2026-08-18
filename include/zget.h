@@ -3,6 +3,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include "zget_version.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -19,10 +20,6 @@ extern "C" {
 #else
 # define ZGET_API
 #endif
-
-#define ZGET_VERSION_MAJOR 0
-#define ZGET_VERSION_MINOR 1
-#define ZGET_VERSION_PATCH 0
 
 typedef struct zget_ctx zget_ctx;
 

@@ -1,9 +1,18 @@
 cmake_minimum_required(VERSION 3.16)
-project(zget VERSION 0.1.0 LANGUAGES C)
+file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/VERSION" ZGET_VERSION LIMIT_COUNT 1)
+if(NOT ZGET_VERSION MATCHES "^[0-9]+\\.[0-9]+\\.[0-9]+$")
+    message(FATAL_ERROR "VERSION must contain MAJOR.MINOR.PATCH")
+endif()
+project(zget VERSION ${ZGET_VERSION} LANGUAGES C)
 
 include(GNUInstallDirs)
 include(CTest)
 include(CMakePackageConfigHelpers)
+
+set(ZGET_GENERATED_INCLUDE_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated")
+file(MAKE_DIRECTORY "${ZGET_GENERATED_INCLUDE_DIR}")
+configure_file(include/zget_version.h.in
+    "${ZGET_GENERATED_INCLUDE_DIR}/zget_version.h" @ONLY)
 
 option(ZGET_BUILD_FUZZERS "Build libFuzzer parser targets" OFF)
 option(ZGET_ENABLE_SANITIZERS "Enable AddressSanitizer and UBSan" OFF)
@@ -33,6 +42,7 @@ foreach(target IN ITEMS libzget libzget_static)
     target_compile_definitions(${target} PRIVATE ZGET_BUILDING)
     target_include_directories(${target} PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+        $<BUILD_INTERFACE:${ZGET_GENERATED_INCLUDE_DIR}>
         $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
         PRIVATE src)
     target_link_libraries(${target} PRIVATE CURL::libcurl ZLIB::ZLIB)
@@ -59,7 +69,8 @@ endif()
 if(BUILD_TESTING OR ZGET_BUILD_FUZZERS)
     add_library(zget_parser_objects OBJECT src/util.c src/zip/zip.c)
     target_compile_features(zget_parser_objects PRIVATE c_std_99)
-    target_include_directories(zget_parser_objects PRIVATE include src)
+    target_include_directories(zget_parser_objects PRIVATE include src
+        "${ZGET_GENERATED_INCLUDE_DIR}")
     if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang|AppleClang")
         target_compile_options(zget_parser_objects PRIVATE
             -Wall -Wextra -Wpedantic -Wconversion)
@@ -73,8 +84,8 @@ endif()
 if(BUILD_TESTING)
     add_executable(zget_unit_tests tests/test_parsers.c
         $<TARGET_OBJECTS:zget_parser_objects>)
-    target_include_directories(zget_unit_tests PRIVATE src)
-    target_include_directories(zget_unit_tests PRIVATE include)
+    target_include_directories(zget_unit_tests PRIVATE src include
+        "${ZGET_GENERATED_INCLUDE_DIR}")
     add_test(NAME unit COMMAND zget_unit_tests)
     find_package(Python3 COMPONENTS Interpreter)
     if(Python3_Interpreter_FOUND AND ZGET_BUILD_REFERENCE_TESTS)
@@ -107,7 +118,8 @@ if(ZGET_BUILD_FUZZERS)
     foreach(parser IN ITEMS eocd cd cd_stream zip64_extra local content_range)
         add_executable(fuzz_${parser} fuzz/fuzz_${parser}.c
             $<TARGET_OBJECTS:zget_parser_objects>)
-        target_include_directories(fuzz_${parser} PRIVATE include src)
+        target_include_directories(fuzz_${parser} PRIVATE include src
+            "${ZGET_GENERATED_INCLUDE_DIR}")
         target_compile_options(fuzz_${parser} PRIVATE -fsanitize=fuzzer,address,undefined)
         target_link_options(fuzz_${parser} PRIVATE -fsanitize=fuzzer,address,undefined)
     endforeach()
@@ -118,6 +130,8 @@ install(TARGETS libzget libzget_static zget EXPORT ZgetTargets
     ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 install(FILES include/zget.h DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+install(FILES "${ZGET_GENERATED_INCLUDE_DIR}/zget_version.h"
+    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
 install(FILES README.md DESTINATION ${CMAKE_INSTALL_DOCDIR})
 # GNUInstallDirs has no license-directory variable. Keep this relative and
 # overridable so DESTDIR and distro-specific policies continue to work.

@@ -24,9 +24,10 @@ stream boundaries and both malformed ZIP metadata and hostile HTTP behavior.
 ## Releases
 
 Releases are built by GitHub Actions when a `vMAJOR.MINOR.PATCH` tag is pushed.
-Before tagging, update the version in `CMakeLists.txt`, `include/zget.h`, and
-`zget_version()` together. The workflow rejects a tag that differs from the
-CMake project version and rejects a built CLI that reports another version.
+Update the single-line `VERSION` file to `MAJOR.MINOR.PATCH`. CMake generates
+the public version header from it, and both `zget_version()` and the HTTP
+user-agent use the generated value. The workflow rejects a tag that differs
+from `VERSION` and rejects a built CLI that reports another version.
 
 The release matrix covers Linux on x86_64 and ARM64, plus macOS on Apple
 Silicon and Intel. Each platform build runs the full test suite before
