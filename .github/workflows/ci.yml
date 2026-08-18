@@ -50,12 +50,11 @@ jobs:
           cmake --install build
           test -x stage/usr/bin/zget
           test -f stage/usr/include/zget.h
+          test -f stage/usr/include/zget_version.h
           test -f stage/usr/share/man/man1/zget.1
           test -f stage/usr/share/licenses/zget/LICENSE
 
-          project_version="$(
-            sed -nE 's/^project\(zget VERSION ([0-9]+\.[0-9]+\.[0-9]+).*/\1/p' CMakeLists.txt
-          )"
+          project_version="$(cat VERSION)"
           abi_version="${project_version%%.*}"
           library="$(find stage/usr -type f -name "libzget.so.${project_version}" -print -quit)"
           pc_file="$(find stage/usr -type f -path '*/pkgconfig/libzget.pc' -print -quit)"
