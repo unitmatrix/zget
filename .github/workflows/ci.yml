@@ -15,6 +15,7 @@ jobs:
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
+      max-parallel: 1
       matrix:
         include:
           - architecture: x86_64
@@ -70,9 +71,11 @@ jobs:
 
   macos:
     name: macOS / ${{ matrix.architecture }}
+    needs: linux
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
+      max-parallel: 1
       matrix:
         include:
           - architecture: arm64
@@ -93,6 +96,7 @@ jobs:
 
   sanitizers:
     name: ASan + UBSan
+    needs: macos
     runs-on: ubuntu-24.04
     steps:
       - name: Check out source
@@ -113,6 +117,7 @@ jobs:
 
   fuzz-smoke:
     name: Parser fuzz smoke
+    needs: sanitizers
     runs-on: ubuntu-24.04
     steps:
       - name: Check out source
@@ -128,3 +133,21 @@ jobs:
           for target in fuzz_eocd fuzz_cd fuzz_cd_stream fuzz_zip64_extra fuzz_local fuzz_content_range; do
             "build/$target" -runs=1000
           done
+
+  ci-success:
+    name: CI / All checks
+    if: ${{ always() }}
+    needs: [linux, macos, sanitizers, fuzz-smoke]
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check required jobs
+        env:
+          LINUX_RESULT: ${{ needs.linux.result }}
+          MACOS_RESULT: ${{ needs.macos.result }}
+          SANITIZERS_RESULT: ${{ needs.sanitizers.result }}
+          FUZZ_RESULT: ${{ needs.fuzz-smoke.result }}
+        run: |
+          test "${LINUX_RESULT}" = success
+          test "${MACOS_RESULT}" = success
+          test "${SANITIZERS_RESULT}" = success
+          test "${FUZZ_RESULT}" = success
