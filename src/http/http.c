@@ -332,8 +332,15 @@ static int perform_range(struct zget_ctx *ctx, uint64_t offset, uint64_t length,
         zget_set_error(ctx, ZGET_ECHANGED, "remote object size changed");
         goto done;
     }
-    if (ctx->strong_etag != NULL && r.etag != NULL &&
-        !starts_with(r.etag, "W/") && strcmp(ctx->strong_etag, r.etag) != 0) {
+    /*
+     * Once a strong ETag is on file, every later response must repeat it
+     * verbatim. Accepting a response that simply omits the header, or that
+     * downgrades it to a weak one, would let a server that ignores If-Match
+     * swap in a same-sized replacement object between range requests.
+     */
+    if (ctx->strong_etag != NULL &&
+        (r.etag == NULL || starts_with(r.etag, "W/") ||
+         strcmp(ctx->strong_etag, r.etag) != 0)) {
         zget_set_error(ctx, ZGET_ECHANGED, "remote object ETag changed");
         goto done;
     }
