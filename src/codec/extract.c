@@ -27,11 +27,13 @@ static int emit(struct extractor *x, const unsigned char *data, size_t length)
     if (length > UINT64_MAX - x->produced ||
         (x->ctx->options.max_output_size != 0 &&
          x->produced + length > x->ctx->options.max_output_size)) {
-        zget_set_error(x->ctx, ZGET_ELIMIT, "output size limit exceeded");
+        zget_error_set(&x->ctx->error, ZGET_ELIMIT,
+                       "output size limit exceeded");
         return 1;
     }
     if (length != 0 && x->output(x->userdata, data, length) != 0) {
-        zget_set_error(x->ctx, ZGET_EIO, "output callback failed");
+        zget_error_set(&x->ctx->error, ZGET_EIO,
+                       "output callback failed");
         return 1;
     }
     {
@@ -50,12 +52,15 @@ static int emit(struct extractor *x, const unsigned char *data, size_t length)
     return 0;
 }
 
-static int store_write(void *opaque, const void *data, size_t length)
+static enum zget_source_action store_write(void *opaque, const void *data,
+                                           size_t length)
 {
-    return emit(opaque, data, length);
+    return emit(opaque, data, length) == 0 ?
+           ZGET_SOURCE_CONTINUE : ZGET_SOURCE_ERROR;
 }
 
-static int deflate_write(void *opaque, const void *data, size_t length)
+static enum zget_source_action deflate_write(void *opaque, const void *data,
+                                             size_t length)
 {
     struct extractor *x = opaque;
     const unsigned char *input = data;
@@ -67,8 +72,9 @@ static int deflate_write(void *opaque, const void *data, size_t length)
      * than permission to ignore trailing bytes.
      */
     if (x->stream_end) {
-        zget_set_error(x->ctx, ZGET_EDEFLATE, "trailing bytes after DEFLATE stream");
-        return 1;
+        zget_error_set(&x->ctx->error, ZGET_EDEFLATE,
+                       "trailing bytes after DEFLATE stream");
+        return ZGET_SOURCE_ERROR;
     }
     while (length != 0) {
         uInt part = length > UINT_MAX ? UINT_MAX : (uInt)length;
@@ -81,18 +87,19 @@ static int deflate_write(void *opaque, const void *data, size_t length)
             x->stream.avail_out = sizeof(output);
             zr = inflate(&x->stream, Z_NO_FLUSH);
             if (zr != Z_OK && zr != Z_STREAM_END) {
-                zget_set_error(x->ctx, ZGET_EDEFLATE, "invalid DEFLATE stream");
-                return 1;
+                zget_error_set(&x->ctx->error, ZGET_EDEFLATE,
+                               "invalid DEFLATE stream");
+                return ZGET_SOURCE_ERROR;
             }
             have = sizeof(output) - x->stream.avail_out;
             if (emit(x, output, have) != 0)
-                return 1;
+                return ZGET_SOURCE_ERROR;
             if (zr == Z_STREAM_END) {
                 x->stream_end = true;
                 if (x->stream.avail_in != 0 || length != part) {
-                    zget_set_error(x->ctx, ZGET_EDEFLATE,
+                    zget_error_set(&x->ctx->error, ZGET_EDEFLATE,
                                    "trailing bytes after DEFLATE stream");
-                    return 1;
+                    return ZGET_SOURCE_ERROR;
                 }
                 break;
             }
@@ -100,7 +107,7 @@ static int deflate_write(void *opaque, const void *data, size_t length)
         input += part;
         length -= part;
     }
-    return 0;
+    return ZGET_SOURCE_CONTINUE;
 }
 
 /* Stream one exact compressed range through STORE or raw DEFLATE and CRC32. */
@@ -118,13 +125,15 @@ int zget_extract_payload(struct zget_ctx *ctx, const zget_entry *entry,
 
     if (ctx->options.max_output_size != 0 &&
         entry->uncompressed_size > ctx->options.max_output_size) {
-        zget_set_error(ctx, ZGET_ELIMIT, "member exceeds output size limit");
+        zget_error_set(&ctx->error, ZGET_ELIMIT,
+                       "member exceeds output size limit");
         return ZGET_ELIMIT;
     }
     if (entry->compression_method == 8) {
         /* ZIP stores raw DEFLATE blocks with no zlib or gzip wrapper/trailer. */
         if (inflateInit2(&x.stream, -MAX_WBITS) != Z_OK) {
-            zget_set_error(ctx, ZGET_EDEFLATE, "could not initialize zlib");
+            zget_error_set(&ctx->error, ZGET_EDEFLATE,
+                           "could not initialize zlib");
             return ZGET_EDEFLATE;
         }
         x.inflate_initialized = true;
@@ -134,27 +143,29 @@ int zget_extract_payload(struct zget_ctx *ctx, const zget_entry *entry,
      * This intentionally stops before any data descriptor following the member.
      */
     if (entry->compressed_size != 0) {
-        rc = ctx->source.read_range(ctx->source.ctx, data_offset,
+        rc = zget_source_read_range(ctx->source, data_offset,
                                     entry->compressed_size,
                                     entry->compression_method == 0 ?
                                     store_write : deflate_write, &x);
         if (rc != ZGET_OK)
             goto done;
     }
-    /* A fully consumed HTTP range is not proof that the DEFLATE stream ended. */
+    /* A fully consumed source range is not proof that DEFLATE reached its end. */
     if (entry->compression_method == 8 && !x.stream_end) {
-        zget_set_error(ctx, ZGET_EDEFLATE, "truncated DEFLATE stream");
+        zget_error_set(&ctx->error, ZGET_EDEFLATE,
+                       "truncated DEFLATE stream");
         rc = ZGET_EDEFLATE;
         goto done;
     }
     if (x.produced != entry->uncompressed_size) {
-        zget_set_error(ctx, ZGET_EZIP, "uncompressed size does not match ZIP metadata");
+        zget_error_set(&ctx->error, ZGET_EZIP,
+                       "uncompressed size does not match ZIP metadata");
         rc = ZGET_EZIP;
         goto done;
     }
     /* CRC is over uncompressed output, exactly as recorded by the ZIP entry. */
     if ((uint32_t)x.crc != entry->crc32) {
-        zget_set_error(ctx, ZGET_ECRC, "CRC32 mismatch");
+        zget_error_set(&ctx->error, ZGET_ECRC, "CRC32 mismatch");
         rc = ZGET_ECRC;
         goto done;
     }
