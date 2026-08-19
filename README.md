@@ -1,9 +1,11 @@
 # zget
 
-Fetch one file from a remote ZIP archive without downloading the archive.
+Fetch one file from a remote ZIP archive without downloading the whole archive.
 
-Designed for very large ZIP/ZIP64 archives, with streaming Central Directory
-parsing and memory usage independent of archive entry count.
+`zget` is a command-line tool and C library for listing and extracting
+individual files from remote ZIP and ZIP64 archives over HTTP Range requests.
+It streams archive metadata with memory usage independent of entry count, so
+the same design works for ordinary archives and scales to very large ones.
 
 ```sh
 zget https://example.com/archive.zip README.txt
@@ -22,9 +24,14 @@ zget -l URL [MEMBER]
 zget -1 URL [MEMBER]
 ```
 
-Member data goes to standard output by default. `-o FILE` instead writes to a
-chosen path, validates the complete extraction before publishing it, and
-refuses to overwrite an existing path.
+## Familiar by design
+
+Archive operations follow `unzip` where practical, while output conventions
+follow `curl`. `zget URL MEMBER` therefore streams to standard output, while
+`-o FILE` names a local output. Unlike ordinary redirection, named output is
+validated completely before publication and never overwrites an existing path.
+`-l` requests an `unzip`-style listing; the compact `-1` form follows `zipinfo`
+and emits only names.
 
 Extraction requires both a URL and an exact member name. A URL without a member
 is a usage error rather than an implicit request to list the archive; use `-l`
@@ -39,13 +46,17 @@ member stays on one safe output line.
 
 For a compact listing, `-1` writes only member names, one per line, with no
 header or totals. It accepts the same optional exact `MEMBER` as `-l` and uses
-the same safe escaping. This form follows the familiar `zipinfo -1` convention.
+the same safe escaping.
 
 ## Why zget?
 
-Tools already exist for accessing remote ZIP archives over HTTP. `zget` focuses
-on a narrower case: fetching one known member from a very large ZIP/ZIP64
-archive with predictable network behavior and bounded memory use.
+Remote ZIP access is not unique to zget. Python projects such as
+[`remotezip`](https://github.com/gtsystem/python-remotezip) and
+[`unzip-http`](https://github.com/saulpw/unzip-http) already list and extract
+members over HTTP without downloading the whole archive. `zget` is a native C
+library and CLI for efficient remote ZIP/ZIP64 access. Its streaming,
+bounded-memory design works for ordinary archives and remains practical as
+archive sizes and entry counts grow, with predictable Range behavior.
 
 `zget` streams the Central Directory, discards metadata for non-matching entries
 immediately, and can stop scanning as soon as the requested entry is found. It
@@ -74,6 +85,27 @@ tail -> central directory -> target local header -> target payload
 
 The first exact Central Directory name match wins. Extraction is streamed
 through STORE or raw-DEFLATE decoding and checked against the entry CRC32.
+
+## Architecture
+
+The CLI is a thin frontend over `libzget`. Internally, format code requests
+semantic byte ranges from a source instead of depending on a transport:
+
+```text
+zget CLI
+    |
+public libzget API
+    |
+format engine  -- semantic ranges -->  source
+    |                                  |
+ZIP / zlib                         HTTP / libcurl
+```
+
+The HTTP source knows nothing about ZIP layout, and the ZIP engine knows
+nothing about libcurl. Current public support remains ZIP/ZIP64; the separation
+is intended to permit other range-friendly container formats later without
+redesigning transport or CLI behavior. It is a small internal boundary, not a
+dynamic plugin system.
 
 ## Build
 
