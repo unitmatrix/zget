@@ -58,6 +58,13 @@ class RangeHandler(BaseHTTPRequestHandler):
             # escape before zget compares the response's total object size.
             body += b"x"
         range_header = self.headers.get("Range")
+        if (type(self).mode == "suffix-unsupported" and range_header and
+                range_header.removeprefix("bytes=").startswith("-")):
+            # GitHub release assets currently reject suffix ranges even though
+            # the same object accepts explicit byte intervals.
+            self.send_response(501)
+            self.end_headers()
+            return
         if type(self).mode == "ignore" or not range_header:
             self.send_response(200)
             self.send_header("Content-Length", str(len(body)))
