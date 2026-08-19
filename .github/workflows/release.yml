@@ -79,8 +79,8 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install Linux dependencies
         if: matrix.libc == 'glibc'
-        timeout-minutes: 5
-        run: scripts/install-ubuntu-dependencies.sh
+        timeout-minutes: 7
+        run: bash -x scripts/install-ubuntu-dependencies.sh
       - name: Configure
         env:
           CC: ${{ matrix.compiler }}
