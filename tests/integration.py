@@ -237,6 +237,16 @@ def main(binary):
     # Each CLI process reads the tail, then streams the Central Directory once.
     assert run_server(data, "normal", listing) == 4
 
+    def suffix_fallback(base):
+        """Retry a rejected suffix request using explicit byte intervals."""
+        result = subprocess.run([binary, "-1", base + "/archive.zip"],
+                                check=True, stdout=subprocess.PIPE,
+                                stderr=subprocess.PIPE)
+        assert result.stdout.splitlines()[0] == b"stored.txt"
+        assert result.stderr == b""
+    # One rejected suffix, one size probe, one exact tail, and one CD request.
+    assert run_server(data, "suffix-unsupported", suffix_fallback) == 4
+
     def specific_listing(base):
         """An exact listing emits one row and stops at the first name match."""
         url = base + "/archive.zip"
@@ -384,8 +394,16 @@ def main(binary):
     # when those headers show that the remote archive changed.
     expect_failure(data, mode="payload-etag-change", no_output=True)
     expect_failure(data, mode="payload-size-change", no_output=True)
-    for mode in ("403", "404", "416", "drop"):
-        expect_failure(data, mode=mode)
+    for mode in ("403", "404", "416"):
+        def explicit_http_status(base, mode=mode):
+            """Expose the final HTTP status instead of a combined vague error."""
+            result = subprocess.run([binary, base + "/archive.zip", "stored.txt"],
+                                    stdout=subprocess.PIPE,
+                                    stderr=subprocess.PIPE)
+            assert result.returncode != 0
+            assert f"HTTP {mode}".encode() in result.stderr, result.stderr
+        run_server(data, mode, explicit_http_status)
+    expect_failure(data, mode="drop")
     expect_failure(data, path="/redirect-loop")
 
     cd = central_entry(data, "stored.txt")

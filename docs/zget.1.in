@@ -85,11 +85,14 @@ Show command usage and exit.
 .B \-\-version
 Show the zget version and exit.
 .SH HTTP REQUIREMENTS
-Each archive request must return a matching 206 Partial Content response with
-an identity Content-Encoding and the expected Content-Range and body length.
-HTTPS redirects may not downgrade to HTTP. A strong ETag, when supplied by the
-server, is used with subsequent requests to ensure that all ranges refer to the
-same archive version.
+Each response accepted as archive data must be a matching 206 Partial Content
+response with an identity Content-Encoding and the expected Content-Range and
+body length. If a server rejects or ignores the initial suffix range but
+supports explicit ranges, zget uses a one-byte size probe and retries the tail
+as an explicit interval. These extra requests count toward the configured HTTP
+request limit. HTTPS redirects may not downgrade to HTTP. A strong ETag, when
+supplied by the server, is used with subsequent requests to ensure that all
+ranges refer to the same archive version.
 .SH EXIT STATUS
 .TP
 .B 0

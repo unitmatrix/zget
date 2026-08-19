@@ -174,6 +174,27 @@ static bool starts_with(const char *s, const char *prefix)
 }
 
 /*
+ * Some otherwise Range-capable servers reject the suffix form (bytes=-N)
+ * while accepting explicit byte intervals. HTTP 200 means the server ignored
+ * the suffix; 400, 416, and 501 are responses seen for rejected syntax. Do not
+ * retry a malformed 206: accepting a second interpretation of contradictory
+ * range metadata would weaken the byte-identity checks below.
+ */
+static bool suffix_status_allows_fallback(long status)
+{
+    return status == 200 || status == 400 || status == 416 || status == 501;
+}
+
+static enum zget_source_action discard_range(void *userdata, const void *data,
+                                             size_t size)
+{
+    (void)userdata;
+    (void)data;
+    (void)size;
+    return ZGET_SOURCE_CONTINUE;
+}
+
+/*
  * Prove that this response belongs to the same remote object established by
  * the first request before any body reaches a consumer. If this check were
  * deferred until curl_easy_perform() returned, changed bytes could already
@@ -246,7 +267,8 @@ static size_t body_cb(char *data, size_t size, size_t nmemb, void *opaque)
  */
 static int perform_range(struct zget_http_source *http, uint64_t offset,
                          uint64_t length, bool suffix,
-                         zget_source_write_cb cb, void *userdata)
+                         zget_source_write_cb cb, void *userdata,
+                         bool *suffix_fallback)
 {
     struct response r = {0};
     struct curl_slist *headers = NULL;
@@ -258,6 +280,8 @@ static int perform_range(struct zget_http_source *http, uint64_t offset,
     CURLcode cc;
     uint64_t expected;
 
+    if (suffix_fallback != NULL)
+        *suffix_fallback = false;
     if (length == 0 || cb == NULL) {
         zget_error_set(http->source.error, ZGET_EINVAL,
                        "invalid zero-length range request");
@@ -355,6 +379,8 @@ static int perform_range(struct zget_http_source *http, uint64_t offset,
         goto done;
     }
     if (r.status == 200) {
+        if (suffix && suffix_fallback != NULL)
+            *suffix_fallback = true;
         zget_error_set(http->source.error, ZGET_ERANGE,
                        "server ignored the required byte range");
         goto done;
@@ -369,9 +395,18 @@ static int perform_range(struct zget_http_source *http, uint64_t offset,
                        "HTTP transfer failed: %s", curl_easy_strerror(cc));
         goto done;
     }
+    if (r.status != 206) {
+        if (suffix && suffix_fallback != NULL &&
+            suffix_status_allows_fallback(r.status))
+            *suffix_fallback = true;
+        zget_error_set(http->source.error, ZGET_EHTTP,
+                       "server returned HTTP %ld for byte-range request",
+                       r.status);
+        goto done;
+    }
     if (!response_range_valid(&r)) {
         zget_error_set(http->source.error, ZGET_EHTTP,
-                       "invalid HTTP status or Content-Range");
+                       "invalid Content-Range for requested byte range");
         goto done;
     }
     if (r.bad_encoding) {
@@ -442,14 +477,37 @@ static int http_read_range(struct zget_source *source, uint64_t offset,
                            void *userdata)
 {
     return perform_range((struct zget_http_source *)source, offset, length,
-                         false, write_cb, userdata);
+                         false, write_cb, userdata, NULL);
 }
 
 static int http_read_suffix(struct zget_source *source, uint64_t length,
                             zget_source_write_cb write_cb, void *userdata)
 {
-    return perform_range((struct zget_http_source *)source, 0, length, true,
-                         write_cb, userdata);
+    struct zget_http_source *http = (struct zget_http_source *)source;
+    uint64_t explicit_length;
+    bool fallback;
+    int rc;
+
+    rc = perform_range(http, 0, length, true, write_cb, userdata, &fallback);
+    if (rc == ZGET_OK || !fallback)
+        return rc;
+
+    /*
+     * A one-byte explicit request obtains the total size from Content-Range
+     * without relying on HEAD metadata or downloading the object. Its byte is
+     * deliberately discarded: the caller requested the tail, not byte zero.
+     * A successful probe also establishes the effective URL and object ETag,
+     * so the following tail request retains the normal identity guarantees.
+     */
+    http->source.error->code = ZGET_OK;
+    http->source.error->message[0] = '\0';
+    rc = perform_range(http, 0, 1, false, discard_range, NULL, NULL);
+    if (rc != ZGET_OK)
+        return rc;
+
+    explicit_length = length < http->source.size ? length : http->source.size;
+    return perform_range(http, http->source.size - explicit_length,
+                         explicit_length, false, write_cb, userdata, NULL);
 }
 
 static void http_close(struct zget_source *source)

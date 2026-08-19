@@ -175,12 +175,17 @@ size lets newer libraries accept callers built with an older options layout.
 
 ## HTTP invariants
 
-Every request must return one matching `206 Partial Content` response with the
-correct body length. A `200` response, inconsistent `Content-Range`, changed
-object size, non-identity `Content-Encoding`, or failed `If-Match` aborts the
-operation. HTTPS redirects cannot downgrade to HTTP. A strong ETag from the
-first response is used for later `If-Match` requests. Without one, consistency
-is best-effort and still checks the object size.
+Every response accepted as archive data must be a matching
+`206 Partial Content` response with the correct body length. The initial tail
+normally uses a suffix range. If a server rejects or ignores that syntax but
+supports explicit ranges, zget uses a one-byte size probe and retries the tail
+as an explicit interval. These extra requests count toward
+`max_http_requests`.
+An inconsistent `Content-Range`, changed object size, non-identity
+`Content-Encoding`, or failed `If-Match` aborts the operation. HTTPS redirects
+cannot downgrade to HTTP. A strong ETag from the first accepted response is
+used for later `If-Match` requests. Without one, consistency is best-effort and
+still checks the object size.
 
 `-o` writes a temporary file in the destination directory and publishes it only
 after decompression and CRC validation. Existing paths are never overwritten.
