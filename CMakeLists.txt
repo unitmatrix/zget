@@ -99,6 +99,11 @@ if(BUILD_TESTING)
     target_link_libraries(zget_options_tests PRIVATE Zget::libzget_static)
     add_test(NAME options COMMAND zget_options_tests)
 
+    # Keep public output parameters deterministic even when validation fails.
+    add_executable(zget_api_tests tests/test_api.c)
+    target_link_libraries(zget_api_tests PRIVATE Zget::libzget_static)
+    add_test(NAME api_contracts COMMAND zget_api_tests)
+
     find_package(Python3 COMPONENTS Interpreter)
     if(Python3_Interpreter_FOUND AND ZGET_BUILD_REFERENCE_TESTS)
         add_test(NAME integration_reference

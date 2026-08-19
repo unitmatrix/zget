@@ -97,9 +97,16 @@ int zget_open_url_ex(const char *archive_url, const zget_options *options,
     struct tail_buffer tail = {0};
     uint64_t request_size, tail_offset;
     int rc;
-    if (out_ctx == NULL || archive_url == NULL || archive_url[0] == '\0')
+    if (out_ctx == NULL)
         return ZGET_EINVAL;
+    /*
+     * Establish a safe ownership state before validating anything else. A
+     * caller can therefore unconditionally close *out_ctx after any failure
+     * without accidentally reusing the pointer that it supplied.
+     */
     *out_ctx = NULL;
+    if (archive_url == NULL || archive_url[0] == '\0')
+        return ZGET_EINVAL;
     if (global_references == 0)
         return ZGET_ENOTINITIALIZED;
     ctx = calloc(1, sizeof(*ctx));
@@ -171,6 +178,12 @@ zget_ctx *zget_open_url(const char *archive_url, const zget_options *options)
 int zget_find(zget_ctx *ctx, const char *member_path, zget_entry *entry)
 {
     size_t length;
+    /*
+     * Failed lookups must not leave metadata from an earlier successful call
+     * looking usable. Clear the output before validating the context or name.
+     */
+    if (entry != NULL)
+        memset(entry, 0, sizeof(*entry));
     if (ctx == NULL || member_path == NULL || entry == NULL)
         return ZGET_EINVAL;
     if (!ctx->ready)
@@ -185,7 +198,6 @@ int zget_find(zget_ctx *ctx, const char *member_path, zget_entry *entry)
                        "member path must be non-empty, valid UTF-8, and at most 65535 bytes");
         return ZGET_EINVAL;
     }
-    memset(entry, 0, sizeof(*entry));
     return zget_find_in_cd(ctx, member_path, entry);
 }
 
