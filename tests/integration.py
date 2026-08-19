@@ -221,6 +221,22 @@ def main(binary):
     # downgrades it must not be trusted just because the size still matches.
     expect_failure(data, mode="missing-etag")
     expect_failure(data, mode="weak-etag")
+    # The first requested entry appears at the start of the Central Directory.
+    # Its successful parser sentinel must not bypass response identity checks:
+    # failure on request two proves zget did not continue to the Local Header.
+    def early_match_identity_failure(base):
+        """Reject a missing validator before accepting an early CD match."""
+        result = subprocess.run([binary, base + "/archive.zip", "stored.txt"],
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        assert result.returncode != 0
+        assert result.stdout == b""
+    assert run_server(data, "missing-etag", early_match_identity_failure) == 2
+
+    # Identity headers are available before curl delivers payload bytes. Even
+    # stdout, which cannot roll back a late CRC error, must remain untouched
+    # when those headers show that the remote archive changed.
+    expect_failure(data, mode="payload-etag-change", no_output=True)
+    expect_failure(data, mode="payload-size-change", no_output=True)
     for mode in ("403", "404", "416", "drop"):
         expect_failure(data, mode=mode)
     expect_failure(data, path="/redirect-loop")

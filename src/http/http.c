@@ -29,6 +29,8 @@ struct response {
     bool bad_content_range;
     bool bad_encoding;
     bool bad_etag;
+    bool identity_checked;
+    bool identity_valid;
     bool callback_failed;
     bool callback_stopped;
     char *etag;
@@ -147,6 +149,43 @@ static bool response_range_valid(const struct response *r)
            (r->suffix || wanted == r->request_length);
 }
 
+static bool starts_with(const char *s, const char *prefix)
+{
+    return strncmp(s, prefix, strlen(prefix)) == 0;
+}
+
+/*
+ * Prove that this response belongs to the same remote object as the archive
+ * tail before any of its body reaches a parser or the caller. If this check
+ * were deferred until curl_easy_perform() returned, a changed payload could
+ * already have been written to stdout, and the Central Directory parser's
+ * intentional early stop could skip the check altogether.
+ *
+ * The first tail response establishes identity only after its complete body is
+ * accepted. Later responses can be checked immediately because archive_size
+ * and, when available, strong_etag are immutable context state.
+ */
+static bool response_identity_valid(struct response *r)
+{
+    if (r->identity_checked)
+        return r->identity_valid;
+    r->identity_checked = true;
+
+    if (r->ctx->archive_size != 0 &&
+        r->ctx->archive_size != r->range_total) {
+        zget_set_error(r->ctx, ZGET_ECHANGED, "remote object size changed");
+        return false;
+    }
+    if (r->ctx->strong_etag != NULL &&
+        (r->etag == NULL || starts_with(r->etag, "W/") ||
+         strcmp(r->ctx->strong_etag, r->etag) != 0)) {
+        zget_set_error(r->ctx, ZGET_ECHANGED, "remote object ETag changed");
+        return false;
+    }
+    r->identity_valid = true;
+    return true;
+}
+
 static size_t body_cb(char *data, size_t size, size_t nmemb, void *opaque)
 {
     struct response *r = opaque;
@@ -161,7 +200,7 @@ static size_t body_cb(char *data, size_t size, size_t nmemb, void *opaque)
      * transformed representation can never reach ZIP parsing or caller output.
      */
     if (!response_load_headers(r) || !response_range_valid(r) ||
-        r->bad_encoding || r->bad_etag)
+        r->bad_encoding || r->bad_etag || !response_identity_valid(r))
         return 0;
     if (UINT64_MAX - r->body_length < n ||
         r->body_length + n > r->range_end - r->range_start + 1)
@@ -178,11 +217,6 @@ static size_t body_cb(char *data, size_t size, size_t nmemb, void *opaque)
     }
     r->body_length += n;
     return n;
-}
-
-static bool starts_with(const char *s, const char *prefix)
-{
-    return strncmp(s, prefix, strlen(prefix)) == 0;
 }
 
 /*
@@ -275,6 +309,9 @@ static int perform_range(struct zget_ctx *ctx, uint64_t offset, uint64_t length,
     /* Zero-length/error responses may never invoke body_cb; inspect them here. */
     if (!response_load_headers(&r))
         goto done;
+    /* Preserve the precise identity error set before body_cb stopped curl. */
+    if (r.identity_checked && !r.identity_valid)
+        goto done;
     if (r.callback_failed) {
         if (ctx->error == ZGET_OK)
             zget_set_error(ctx, ZGET_EIO, "range consumer rejected output");
@@ -316,6 +353,9 @@ static int perform_range(struct zget_ctx *ctx, uint64_t offset, uint64_t length,
         zget_set_error(ctx, ZGET_EHTTP, "server returned multiple ETag headers");
         goto done;
     }
+    /* Also cover a response whose body was empty and never invoked body_cb. */
+    if (!response_identity_valid(&r))
+        goto done;
     expected = r.range_end - r.range_start + 1;
     /* Content-Range can be correct while the connection body is truncated. */
     if (r.body_length != expected) {
@@ -325,23 +365,6 @@ static int perform_range(struct zget_ctx *ctx, uint64_t offset, uint64_t length,
     if (cc != CURLE_OK) {
         zget_set_error(ctx, ZGET_EHTTP, "HTTP transfer failed: %s",
                        curl_easy_strerror(cc));
-        goto done;
-    }
-    /* Size is always an identity check; ETag strengthens it when one is available. */
-    if (ctx->archive_size != 0 && ctx->archive_size != r.range_total) {
-        zget_set_error(ctx, ZGET_ECHANGED, "remote object size changed");
-        goto done;
-    }
-    /*
-     * Once a strong ETag is on file, every later response must repeat it
-     * verbatim. Accepting a response that simply omits the header, or that
-     * downgrades it to a weak one, would let a server that ignores If-Match
-     * swap in a same-sized replacement object between range requests.
-     */
-    if (ctx->strong_etag != NULL &&
-        (r.etag == NULL || starts_with(r.etag, "W/") ||
-         strcmp(ctx->strong_etag, r.etag) != 0)) {
-        zget_set_error(ctx, ZGET_ECHANGED, "remote object ETag changed");
         goto done;
     }
     if (ctx->archive_size == 0) {
