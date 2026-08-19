@@ -85,11 +85,16 @@ installed `libzget`; curl, zlib, TLS, and the platform C runtime remain dynamic.
 
 ## Library
 
-The installed header is `<zget.h>`. `zget_open_url_ex()` retains a diagnostic
-context even when opening fails; inspect it with `zget_last_error_message()` and
-always release it with `zget_close()`. `zget_open_url()` is the shorter API when
-only success or failure is needed. A context must not be used concurrently;
-different contexts are independent.
+The installed header is `<zget.h>`. Call `zget_global_init()` during
+single-threaded application startup, before creating any zget contexts, and
+match every successful call with `zget_global_cleanup()` during shutdown after
+all contexts are closed. The CLI handles this lifecycle automatically.
+
+`zget_open_url_ex()` retains a diagnostic context even when opening fails;
+inspect it with `zget_last_error_message()` and always release it with
+`zget_close()`. `zget_open_url()` is the shorter API when only success or
+failure is needed. A context must not be used concurrently; after global
+initialization, different contexts may be used by different threads.
 
 `max_output_size`, `max_metadata_bytes`, and `max_http_requests` let embedding
 applications impose defensive limits. The CLI leaves output and metadata sizes

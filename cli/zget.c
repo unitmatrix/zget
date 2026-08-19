@@ -68,6 +68,13 @@ int main(int argc, char **argv)
         return 2;
     }
 
+    /* The CLI owns one process-wide acquisition around all network work. */
+    rc = zget_global_init();
+    if (rc != ZGET_OK) {
+        fprintf(stderr, "zget: %s\n", zget_error_string(rc));
+        return 1;
+    }
+
     zget_options_init(&options);
     /* CLI users may legitimately target archives with enormous directories. */
     options.max_metadata_bytes = UINT64_MAX;
@@ -147,5 +154,6 @@ done:
         free(temp_path);
     }
     zget_close(ctx);
+    zget_global_cleanup();
     return exit_status;
 }

@@ -37,7 +37,8 @@ typedef enum zget_error {
     ZGET_EDEFLATE,
     ZGET_EIO,
     ZGET_ELIMIT,
-    ZGET_ENOMEM
+    ZGET_ENOMEM,
+    ZGET_ENOTINITIALIZED
 } zget_error;
 
 /*
@@ -68,6 +69,19 @@ typedef struct zget_entry {
     uint16_t flags;
 } zget_entry;
 
+/*
+ * Acquire zget's process-wide HTTP backend during single-threaded application
+ * startup. Every successful call must be matched by zget_global_cleanup()
+ * after all zget contexts have been closed and application threads using zget
+ * have stopped. Multiple acquisitions are supported and reference-counted.
+ *
+ * The lifecycle is deliberately explicit: libcurl's global state belongs to
+ * the process, not to an individual zget_ctx, and some libcurl builds require
+ * initialization before any additional threads are started.
+ */
+ZGET_API int zget_global_init(void);
+ZGET_API void zget_global_cleanup(void);
+
 /* Initialize all fields, including struct_size, before overriding limits. */
 ZGET_API void zget_options_init(zget_options *options);
 
@@ -82,7 +96,8 @@ ZGET_API zget_ctx *zget_open_url(const char *archive_url,
 /*
  * Diagnostic form of zget_open_url(). On most failures, *out_ctx retains the
  * detailed error and still belongs to the caller; always pass it to
- * zget_close(). Invalid arguments and allocation failure may leave it NULL.
+ * zget_close(). Invalid arguments, missing global initialization, and
+ * allocation failure may leave it NULL.
  */
 ZGET_API int zget_open_url_ex(const char *archive_url,
                               const zget_options *options,
