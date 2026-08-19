@@ -31,9 +31,8 @@ jobs:
       - name: Check out source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libcurl4-openssl-dev pkg-config zlib1g-dev
+        timeout-minutes: 5
+        run: scripts/install-ubuntu-dependencies.sh
       - name: Configure
         env:
           CC: ${{ matrix.compiler }}
@@ -110,7 +109,8 @@ jobs:
       - name: Check out source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install dependencies
-        run: sudo apt-get update && sudo apt-get install -y clang libcurl4-openssl-dev zlib1g-dev
+        timeout-minutes: 5
+        run: scripts/install-ubuntu-dependencies.sh clang
       - name: Configure
         env:
           CC: clang
@@ -131,7 +131,8 @@ jobs:
       - name: Check out source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install dependencies
-        run: sudo apt-get update && sudo apt-get install -y clang libcurl4-openssl-dev zlib1g-dev
+        timeout-minutes: 5
+        run: scripts/install-ubuntu-dependencies.sh clang
       - name: Configure and build fuzzers
         env:
           CC: clang
