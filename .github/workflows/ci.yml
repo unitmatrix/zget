@@ -66,6 +66,18 @@ jobs:
           installed_version="$(PKG_CONFIG_PATH="${pc_dir}" pkg-config --modversion libzget)"
           test "${installed_version}" = "${project_version}"
 
+          # Validation alone does not prove that the installed paths are
+          # usable from a package staging root. Compile through pkg-config's
+          # sysroot support so this test cannot accidentally find host zget.
+          pc_flags="$(PKG_CONFIG_PATH="${pc_dir}" \
+            PKG_CONFIG_SYSROOT_DIR="${GITHUB_WORKSPACE}/stage" \
+            pkg-config --cflags --libs libzget)"
+          ${{ matrix.compiler }} tests/package/main.c ${pc_flags} \
+            -o package-consumer-pkg-config
+          pc_version="$(LD_LIBRARY_PATH="$(dirname "${library}")" \
+            ./package-consumer-pkg-config)"
+          test "${pc_version}" = "${project_version}"
+
           cmake -S tests/package -B package-build \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_PREFIX_PATH="${GITHUB_WORKSPACE}/stage/usr"
@@ -74,6 +86,44 @@ jobs:
           shared_version="$(LD_LIBRARY_PATH="$(dirname "${library}")" \
             package-build/consumer)"
           test "${shared_version}" = "${project_version}"
+
+  musl:
+    name: Linux / x86_64 / musl
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Build, test, and verify installation on Alpine
+        run: |
+          # Plain progress keeps the package installation and every Dockerfile
+          # command visible in the workflow log when this environment changes.
+          docker build --progress=plain --tag zget-musl-ci \
+            .github/containers/musl
+
+          # Keep container-owned build products outside the checkout. The
+          # read-only mount also catches build rules that modify source files.
+          docker run --rm --platform linux/amd64 \
+            --volume "${GITHUB_WORKSPACE}:/source:ro" \
+            zget-musl-ci sh -euxc '
+              cmake -S /source -B /tmp/build \
+                -DCMAKE_BUILD_TYPE=Release \
+                -DCMAKE_INSTALL_PREFIX=/usr
+              cmake --build /tmp/build --parallel 2
+              ctest --test-dir /tmp/build --output-on-failure
+              DESTDIR=/tmp/stage cmake --install /tmp/build
+
+              # Exercise both exported library targets against musl. This is
+              # compatibility coverage, not a fully static release build.
+              cmake -S /source/tests/package -B /tmp/package-build \
+                -DCMAKE_BUILD_TYPE=Release \
+                -DCMAKE_PREFIX_PATH=/tmp/stage/usr
+              cmake --build /tmp/package-build --parallel 2
+              expected="$(cat /source/VERSION)"
+              test "$(/tmp/package-build/consumer_static)" = "${expected}"
+              shared="$(LD_LIBRARY_PATH=/tmp/stage/usr/lib \
+                /tmp/package-build/consumer)"
+              test "${shared}" = "${expected}"
+            '
 
   macos:
     name: macOS / ${{ matrix.architecture }}
@@ -141,17 +191,19 @@ jobs:
   ci-success:
     name: CI / All checks
     if: ${{ always() }}
-    needs: [linux, macos, sanitizers, fuzz-smoke]
+    needs: [linux, musl, macos, sanitizers, fuzz-smoke]
     runs-on: ubuntu-24.04
     steps:
       - name: Check required jobs
         env:
           LINUX_RESULT: ${{ needs.linux.result }}
+          MUSL_RESULT: ${{ needs.musl.result }}
           MACOS_RESULT: ${{ needs.macos.result }}
           SANITIZERS_RESULT: ${{ needs.sanitizers.result }}
           FUZZ_RESULT: ${{ needs.fuzz-smoke.result }}
         run: |
           test "${LINUX_RESULT}" = success
+          test "${MUSL_RESULT}" = success
           test "${MACOS_RESULT}" = success
           test "${SANITIZERS_RESULT}" = success
           test "${FUZZ_RESULT}" = success
