@@ -11,6 +11,19 @@ zget -o file.iso https://example.com/archive.zip path/to/file.iso
 zget https://example.com/data.zip config.json | jq .
 ```
 
+## Usage
+
+```text
+zget [-o FILE] URL MEMBER
+```
+
+Member data goes to standard output by default. `-o FILE` instead writes to a
+chosen path, validates the complete extraction before publishing it, and
+refuses to overwrite an existing path.
+
+The URL and exact member name are both required. A URL without a member is a
+usage error rather than an implicit request to list the archive.
+
 ## Why zget?
 
 Tools already exist for accessing remote ZIP archives over HTTP. `zget` focuses
