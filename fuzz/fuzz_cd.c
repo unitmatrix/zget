@@ -1,5 +1,5 @@
-#include "internal.h"
-#include "zip/zip_parse.h"
+#include "format/zip/zip-parse.h"
+#include "zget.h"
 #include <stddef.h>
 #include <stdint.h>
 /* Exercise the fixed Central Directory parser with arbitrary record bytes. */

@@ -30,7 +30,8 @@ find_package(ZLIB REQUIRED)
 set(ZGET_LIBRARY_SOURCES
     src/zget.c src/error.c src/util.c src/source/source.c
     src/source/http-parse.c src/source/http.c
-    src/zip/zip.c src/codec/extract.c)
+    src/format/format.c src/format/zip/zip.c
+    src/format/zip/extract.c)
 
 add_library(libzget SHARED ${ZGET_LIBRARY_SOURCES})
 add_library(libzget_static STATIC ${ZGET_LIBRARY_SOURCES})
@@ -71,7 +72,8 @@ endif()
 if(BUILD_TESTING OR ZGET_BUILD_FUZZERS)
     add_library(zget_parser_objects OBJECT
         src/error.c src/util.c src/source/source.c src/source/http-parse.c
-        src/zip/zip.c)
+        src/format/format.c src/format/zip/zip.c
+        src/format/zip/extract.c)
     target_compile_features(zget_parser_objects PRIVATE c_std_99)
     target_include_directories(zget_parser_objects PRIVATE include src
         "${ZGET_GENERATED_INCLUDE_DIR}")
@@ -90,6 +92,7 @@ if(BUILD_TESTING)
         $<TARGET_OBJECTS:zget_parser_objects>)
     target_include_directories(zget_unit_tests PRIVATE src include
         "${ZGET_GENERATED_INCLUDE_DIR}")
+    target_link_libraries(zget_unit_tests PRIVATE ZLIB::ZLIB)
     add_test(NAME unit COMMAND zget_unit_tests)
 
     # Exercise the public process lifecycle through the same static library
@@ -113,6 +116,13 @@ if(BUILD_TESTING)
     target_include_directories(zget_source_tests PRIVATE src)
     target_link_libraries(zget_source_tests PRIVATE Zget::libzget_static)
     add_test(NAME source_contracts COMMAND zget_source_tests)
+
+    # Prove that a format engine can open, find, and extract from a non-HTTP
+    # source. This boundary test would catch transport assumptions in ZIP code.
+    add_executable(zget_format_tests tests/test_format.c)
+    target_include_directories(zget_format_tests PRIVATE src)
+    target_link_libraries(zget_format_tests PRIVATE Zget::libzget_static)
+    add_test(NAME format_contracts COMMAND zget_format_tests)
 
     find_package(Python3 COMPONENTS Interpreter)
     if(Python3_Interpreter_FOUND AND ZGET_BUILD_REFERENCE_TESTS)
@@ -149,6 +159,7 @@ if(ZGET_BUILD_FUZZERS)
             "${ZGET_GENERATED_INCLUDE_DIR}")
         target_compile_options(fuzz_${parser} PRIVATE -fsanitize=fuzzer,address,undefined)
         target_link_options(fuzz_${parser} PRIVATE -fsanitize=fuzzer,address,undefined)
+        target_link_libraries(fuzz_${parser} PRIVATE ZLIB::ZLIB)
     endforeach()
 endif()
 

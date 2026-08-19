@@ -1,6 +1,8 @@
-#include "internal.h"
+#include "format/zip/zip-parse.h"
 #include "source/http-parse.h"
-#include "zip/zip_parse.h"
+#include "source/source.h"
+#include "util.h"
+#include "zget.h"
 
 #include <stdio.h>
 #include <string.h>

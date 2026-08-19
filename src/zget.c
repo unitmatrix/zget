@@ -1,5 +1,7 @@
 #include "internal.h"
+#include "format/format.h"
 #include "source/http.h"
+#include "source/source.h"
 
 #include <limits.h>
 #include <stdlib.h>
@@ -35,23 +37,6 @@ void zget_global_cleanup(void)
         return;
     --global_references;
     zget_http_global_cleanup();
-}
-
-struct tail_buffer {
-    unsigned char *data;
-    size_t capacity;
-    size_t length;
-};
-
-static enum zget_source_action tail_write(void *opaque, const void *data,
-                                          size_t length)
-{
-    struct tail_buffer *tail = opaque;
-    if (length > tail->capacity - tail->length)
-        return ZGET_SOURCE_ERROR;
-    memcpy(tail->data + tail->length, data, length);
-    tail->length += length;
-    return ZGET_SOURCE_CONTINUE;
 }
 
 void zget_options_init(zget_options *options)
@@ -96,14 +81,12 @@ static int copy_options(struct zget_ctx *ctx, const zget_options *options)
     return ZGET_OK;
 }
 
-/* Fetch and resolve only the archive tail; member lookup remains a later range. */
 int zget_open_url_ex(const char *archive_url, const zget_options *options,
                      zget_ctx **out_ctx)
 {
     struct zget_ctx *ctx;
-    struct tail_buffer tail = {0};
+    struct zget_format_options format_options;
     struct zget_http_options http_options;
-    uint64_t request_size, source_size, tail_offset;
     int rc;
     if (out_ctx == NULL)
         return ZGET_EINVAL;
@@ -127,46 +110,20 @@ int zget_open_url_ex(const char *archive_url, const zget_options *options,
     if ((rc = zget_http_source_open(archive_url, &http_options, &ctx->error,
                                     &ctx->source)) != ZGET_OK)
         goto fail;
-
     /*
-     * EOCD is at least 22 bytes and can follow a 65535-byte archive comment.
-     * A 128 KiB suffix also normally contains the ZIP64 locator and fixed EOCD,
-     * while keeping the first request bounded for very large archives.
+     * Public orchestration selects a source, then delegates all container
+     * discovery to the format layer. This is the only point where those two
+     * independently testable halves are joined.
      */
-    request_size = ZGET_TAIL_SIZE;
-    if (ctx->options.max_metadata_bytes < request_size)
-        request_size = ctx->options.max_metadata_bytes;
-    if (request_size < 22) {
-        zget_error_set(&ctx->error, ZGET_ELIMIT,
-                       "metadata limit is too small for ZIP EOCD");
-        rc = ZGET_ELIMIT;
-        goto fail;
-    }
-    tail.capacity = (size_t)request_size;
-    tail.data = malloc(tail.capacity);
-    if (tail.data == NULL) {
-        rc = ZGET_ENOMEM;
-        goto fail;
-    }
-    if ((rc = zget_source_read_suffix(ctx->source, request_size,
-                                      tail_write, &tail)) != ZGET_OK)
-        goto fail;
-    if (!zget_source_get_size(ctx->source, &source_size) ||
-        tail.length > source_size) {
-        zget_error_set(&ctx->error, ZGET_EHTTP,
-                       "source size unavailable after suffix request");
-        rc = ZGET_EHTTP;
-        goto fail;
-    }
-    tail_offset = source_size - tail.length;
-    if ((rc = zget_parse_tail(ctx, tail.data, tail.length, tail_offset)) != ZGET_OK)
+    format_options.max_metadata_bytes = ctx->options.max_metadata_bytes;
+    format_options.max_output_size = ctx->options.max_output_size;
+    if ((rc = zget_format_open(ctx->source, &format_options, &ctx->error,
+                               &ctx->format)) != ZGET_OK)
         goto fail;
     ctx->ready = true;
-    free(tail.data);
     *out_ctx = ctx;
     return ZGET_OK;
 fail:
-    free(tail.data);
     if (ctx->error.code == ZGET_OK)
         zget_error_set(&ctx->error, rc, "%s", zget_error_string(rc));
     /*
@@ -189,7 +146,6 @@ zget_ctx *zget_open_url(const char *archive_url, const zget_options *options)
 
 int zget_find(zget_ctx *ctx, const char *member_path, zget_entry *entry)
 {
-    size_t length;
     /*
      * Failed lookups must not leave metadata from an earlier successful call
      * looking usable. Clear the output before validating the context or name.
@@ -202,43 +158,19 @@ int zget_find(zget_ctx *ctx, const char *member_path, zget_entry *entry)
         return ctx->error.code != ZGET_OK ? ctx->error.code : ZGET_EINVAL;
     ctx->error.code = ZGET_OK;
     ctx->error.message[0] = '\0';
-    length = strlen(member_path);
-    /* Member names are archive identifiers: compare exact bytes, without path normalization. */
-    if (length == 0 || length > UINT16_MAX ||
-        !zget_valid_utf8((const unsigned char *)member_path, length)) {
-        zget_error_set(&ctx->error, ZGET_EINVAL,
-                       "member path must be non-empty, valid UTF-8, and at most 65535 bytes");
-        return ZGET_EINVAL;
-    }
-    return zget_find_in_cd(ctx, member_path, entry);
+    return zget_format_find(ctx->format, member_path, entry);
 }
 
 int zget_extract(zget_ctx *ctx, const zget_entry *entry,
                  zget_write_cb write_cb, void *userdata)
 {
-    uint64_t data_offset;
-    int rc;
     if (ctx == NULL || entry == NULL || write_cb == NULL)
         return ZGET_EINVAL;
     if (!ctx->ready)
         return ctx->error.code != ZGET_OK ? ctx->error.code : ZGET_EINVAL;
     ctx->error.code = ZGET_OK;
     ctx->error.message[0] = '\0';
-    /* zget_entry is public, so reapply the hard codec/encryption whitelist here. */
-    if ((entry->flags & 0x0041u) != 0) {
-        zget_error_set(&ctx->error, ZGET_EUNSUPPORTED,
-                       "encrypted ZIP entries are unsupported");
-        return ZGET_EUNSUPPORTED;
-    }
-    if (entry->compression_method != 0 && entry->compression_method != 8) {
-        zget_error_set(&ctx->error, ZGET_ECOMPRESSION,
-                       "unsupported ZIP compression method");
-        return ZGET_ECOMPRESSION;
-    }
-    rc = zget_read_local_header(ctx, entry, &data_offset);
-    if (rc != ZGET_OK)
-        return rc;
-    return zget_extract_payload(ctx, entry, data_offset, write_cb, userdata);
+    return zget_format_extract(ctx->format, entry, write_cb, userdata);
 }
 
 int zget_get(const char *archive_url, const char *member_path,
@@ -268,6 +200,7 @@ void zget_close(zget_ctx *ctx)
      */
     if (ctx == NULL)
         return;
+    zget_format_close(ctx->format);
     zget_source_close(ctx->source);
     free(ctx);
 }
