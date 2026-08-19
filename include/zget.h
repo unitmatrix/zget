@@ -48,6 +48,11 @@ typedef enum zget_error {
  */
 typedef int (*zget_write_cb)(void *userdata, const void *data, size_t size);
 
+/*
+ * This structure is append-only. zget_options_init() records the caller's
+ * known size so newer libraries can preserve defaults for fields that were not
+ * present when the caller was compiled.
+ */
 typedef struct zget_options {
     size_t struct_size;
     uint64_t max_output_size;    /* zero means unlimited */
@@ -55,6 +60,10 @@ typedef struct zget_options {
     uint32_t max_http_requests;  /* zero means unlimited */
     uint32_t max_redirects;      /* zero selects 8 */
 } zget_options;
+
+/* Frozen boundary of the fields published in the original options ABI. */
+#define ZGET_OPTIONS_V1_SIZE \
+    (offsetof(zget_options, max_redirects) + sizeof(uint32_t))
 
 /*
  * Extraction metadata returned by zget_find(). Fields are public for ABI

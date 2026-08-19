@@ -98,7 +98,8 @@ initialization, different contexts may be used by different threads.
 
 `max_output_size`, `max_metadata_bytes`, and `max_http_requests` let embedding
 applications impose defensive limits. The CLI leaves output and metadata sizes
-unrestricted.
+unrestricted. Always start with `zget_options_init()`; the recorded structure
+size lets newer libraries accept callers built with an older options layout.
 
 ## HTTP invariants
 
