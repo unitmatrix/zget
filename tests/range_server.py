@@ -52,6 +52,11 @@ class RangeHandler(BaseHTTPRequestHandler):
         body = type(self).data
         if type(self).mode == "size-change" and request_number > 1:
             body += b"x"
+        if type(self).mode == "payload-size-change" and request_number >= 4:
+            # The first three ranges establish and navigate the original ZIP;
+            # change only the payload response to verify that no member bytes
+            # escape before zget compares the response's total object size.
+            body += b"x"
         range_header = self.headers.get("Range")
         if type(self).mode == "ignore" or not range_header:
             self.send_response(200)
@@ -98,6 +103,11 @@ class RangeHandler(BaseHTTPRequestHandler):
             pass
         elif type(self).mode == "weak-etag" and request_number > 1:
             self.send_header("ETag", "W/" + type(self).etag)
+        elif type(self).mode == "payload-etag-change" and request_number >= 4:
+            # Deliberately ignore If-Match and swap validators only when member
+            # output would normally begin. A robust client must reject headers
+            # before passing the first payload byte to its output callback.
+            self.send_header("ETag", '"zget-test-v2"')
         else:
             self.send_header("ETag", type(self).etag)
         if type(self).mode == "duplicate-etag":
