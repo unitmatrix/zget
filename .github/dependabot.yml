@@ -9,3 +9,10 @@ updates:
       workflow-actions:
         patterns:
           - "*"
+
+  # Keep the musl validation environment current without hiding its base
+  # image inside workflow shell text that Dependabot cannot inspect.
+  - package-ecosystem: "docker"
+    directory: "/.github/containers/musl"
+    schedule:
+      interval: "weekly"
