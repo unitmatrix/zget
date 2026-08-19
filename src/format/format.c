@@ -42,6 +42,15 @@ int zget_format_extract_member(struct zget_format *format, const char *member,
     return format->ops->extract_member(format, member, write_cb, userdata);
 }
 
+int zget_format_list(struct zget_format *format, const char *member,
+                     zget_list_cb list_cb, void *userdata)
+{
+    if (format == NULL || format->ops == NULL ||
+        format->ops->list == NULL || list_cb == NULL)
+        return ZGET_EINVAL;
+    return format->ops->list(format, member, list_cb, userdata);
+}
+
 int zget_format_find(struct zget_format *format, const char *member,
                      zget_entry *entry)
 {

@@ -16,7 +16,7 @@ struct zget_eocd {
 
 struct zget_cd_fixed {
     uint16_t version_needed, flags, method, name_length, extra_length;
-    uint16_t comment_length, disk;
+    uint16_t modified_time, modified_date, comment_length, disk;
     uint32_t crc32, compressed_size, uncompressed_size, local_offset;
 };
 

@@ -22,6 +22,13 @@ static int discard(void *userdata, const void *data, size_t size)
     return 0;
 }
 
+static int discard_member(void *userdata, const zget_member_info *member)
+{
+    (void)userdata;
+    (void)member;
+    return 0;
+}
+
 static int expect_entry_v1_layout(void)
 {
     /* Existing binaries pass this structure by address, so offsets are ABI. */
@@ -78,6 +85,11 @@ int main(void)
     failed |= expect_entry_v1_layout();
     if (zget_extract_member(NULL, "member", discard, NULL) != ZGET_EINVAL) {
         fprintf(stderr, "extract-member accepted a NULL context\n");
+        failed = 1;
+    }
+    if (zget_list(NULL, NULL, discard_member, NULL) != ZGET_EINVAL ||
+        zget_list((zget_ctx *)1, NULL, NULL, NULL) != ZGET_EINVAL) {
+        fprintf(stderr, "list accepted a NULL context or callback\n");
         failed = 1;
     }
     return failed ? 1 : 0;

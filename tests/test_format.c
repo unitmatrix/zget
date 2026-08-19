@@ -19,6 +19,16 @@ struct output_buffer {
     size_t length;
 };
 
+struct member_buffer {
+    char name[16];
+    size_t name_length;
+    uint64_t uncompressed_size;
+    uint32_t flags;
+    uint16_t modified_year;
+    uint8_t modified_month, modified_day, modified_hour, modified_minute;
+    unsigned int count;
+};
+
 static int deliver(struct memory_source *memory, uint64_t offset,
                    uint64_t length, zget_source_write_cb write_cb,
                    void *userdata)
@@ -105,6 +115,10 @@ static size_t make_stored_zip(unsigned char *zip)
     put32(zip + pos, 0x02014b50u);
     put16(zip + pos + 4, 20);
     put16(zip + pos + 6, 20);
+    /* 2026-04-08 13:40 in the ZIP-local packed DOS representation. */
+    put16(zip + pos + 12, (uint16_t)((13u << 11) | (40u << 5)));
+    put16(zip + pos + 14,
+          (uint16_t)(((2026u - 1980u) << 9) | (4u << 5) | 8u));
     put32(zip + pos + 16, crc);
     put32(zip + pos + 20, sizeof(payload) - 1);
     put32(zip + pos + 24, sizeof(payload) - 1);
@@ -135,6 +149,33 @@ static int collect(void *userdata, const void *data, size_t length)
     return 0;
 }
 
+static int collect_member(void *userdata, const zget_member_info *member)
+{
+    struct member_buffer *output = userdata;
+
+    if (member->struct_size < ZGET_MEMBER_INFO_V1_SIZE ||
+        member->name_length > sizeof(output->name))
+        return 1;
+    memcpy(output->name, member->name, member->name_length);
+    output->name_length = member->name_length;
+    output->uncompressed_size = member->uncompressed_size;
+    output->flags = member->flags;
+    output->modified_year = member->modified_year;
+    output->modified_month = member->modified_month;
+    output->modified_day = member->modified_day;
+    output->modified_hour = member->modified_hour;
+    output->modified_minute = member->modified_minute;
+    ++output->count;
+    return 0;
+}
+
+static int reject_member(void *userdata, const zget_member_info *member)
+{
+    (void)userdata;
+    (void)member;
+    return 1;
+}
+
 int main(void)
 {
     unsigned char bytes[113];
@@ -143,6 +184,7 @@ int main(void)
     struct zget_format_options options = {1024 * 1024, 0};
     struct zget_format *format = NULL;
     struct output_buffer output = {0};
+    struct member_buffer members = {0};
     zget_entry entry;
     int rc;
 
@@ -171,6 +213,28 @@ int main(void)
     rc = zget_format_extract_member(format, "a.txt", collect, &output);
     if (rc != ZGET_OK || output.length != 5 ||
         memcmp(output.data, "hello", 5) != 0 || memory.reads != 7)
+        goto fail;
+
+    /* Listing traverses the same format engine and borrows one record at a time. */
+    rc = zget_format_list(format, NULL, collect_member, &members);
+    if (rc != ZGET_OK || members.count != 1 ||
+        members.name_length != 5 || memcmp(members.name, "a.txt", 5) != 0 ||
+        members.uncompressed_size != 5 ||
+        members.flags != (ZGET_MEMBER_NAME_UTF8 |
+                          ZGET_MEMBER_HAS_MODIFIED_TIME) ||
+        members.modified_year != 2026 || members.modified_month != 4 ||
+        members.modified_day != 8 || members.modified_hour != 13 ||
+        members.modified_minute != 40 || memory.reads != 8)
+        goto fail;
+    memset(&members, 0, sizeof(members));
+    rc = zget_format_list(format, "a.txt", collect_member, &members);
+    if (rc != ZGET_OK || members.count != 1 || memory.reads != 9)
+        goto fail;
+    rc = zget_format_list(format, NULL, reject_member, NULL);
+    if (rc != ZGET_EIO || memory.reads != 10)
+        goto fail;
+    rc = zget_format_list(format, "missing", collect_member, &members);
+    if (rc != ZGET_ENOTFOUND || memory.reads != 11)
         goto fail;
 
     zget_format_close(format);

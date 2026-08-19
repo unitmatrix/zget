@@ -7,6 +7,8 @@ struct zget_format_ops {
     /* Core operation: no format-specific locator crosses this boundary. */
     int (*extract_member)(struct zget_format *format, const char *member,
                           zget_write_cb write_cb, void *userdata);
+    int (*list)(struct zget_format *format, const char *member,
+                zget_list_cb list_cb, void *userdata);
 
     /*
      * These hooks preserve the v0.1 ZIP metadata API. New format engines need

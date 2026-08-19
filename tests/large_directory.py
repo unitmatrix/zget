@@ -26,6 +26,23 @@ def check(binary, count):
     thread.start()
     base = f"http://127.0.0.1:{server.server_port}/archive.zip"
     try:
+        listing = subprocess.run([binary, "-l", base], check=True,
+                                 stdout=subprocess.PIPE).stdout.splitlines()
+        # Two header lines and two footer lines surround exactly one streamed
+        # line per entry; checking the endpoints catches accidental buffering or
+        # truncation without retaining another archive-sized model in zget.
+        assert len(listing) == count + 4
+        assert listing[2].endswith(b"entry/000000000")
+        assert listing[-3].endswith(f"entry/{count - 1:09d}".encode())
+        assert listing[-1].endswith(f"{count} files".encode())
+
+        # Names-only listing must preserve the same streaming scale without
+        # accidentally introducing table decoration or an entry-count buffer.
+        names = subprocess.run([binary, "-1", base], check=True,
+                               stdout=subprocess.PIPE).stdout.splitlines()
+        assert len(names) == count
+        assert names[0] == b"entry/000000000"
+        assert names[-1] == f"entry/{count - 1:09d}".encode()
         for i in (0, count // 2, count - 1):
             result = subprocess.run([binary, base, f"entry/{i:09d}"],
                                     check=True, stdout=subprocess.PIPE)

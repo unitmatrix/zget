@@ -27,6 +27,8 @@ int zget_zip_parse_cd_fixed(const unsigned char *p, size_t length,
     out->version_needed = zget_le16(p + 6);
     out->flags = zget_le16(p + 8);
     out->method = zget_le16(p + 10);
+    out->modified_time = zget_le16(p + 12);
+    out->modified_date = zget_le16(p + 14);
     out->crc32 = zget_le32(p + 16);
     out->compressed_size = zget_le32(p + 20);
     out->uncompressed_size = zget_le32(p + 24);
@@ -301,9 +303,9 @@ static int zip_parse_tail(struct zget_zip_format *zip,
  *
  *   fixed header -> name -> extra -> comment -> next fixed header
  *
- * Only one entry is live. The filename buffer is reused across entries, extras
- * are retained only for an exact match, and comments are skipped. Memory is
- * therefore bounded by one ZIP entry rather than the archive entry count.
+ * Only one entry is live. Name and extra-field buffers are reused across
+ * entries, and comments are skipped. Memory is therefore bounded by the
+ * largest individual ZIP entry rather than the archive entry count.
  */
 enum cd_state { CD_HEADER, CD_NAME, CD_EXTRA, CD_COMMENT, CD_COMPLETE };
 struct cd_parser {
@@ -311,18 +313,22 @@ struct cd_parser {
     const unsigned char *target;
     size_t target_len;
     zget_entry *result;
+    zget_list_cb list_cb;
+    void *list_userdata;
     enum cd_state state;
     unsigned char header[46];
     size_t have;
     unsigned char *name;
     unsigned char *extra;
-    size_t name_capacity;
+    size_t name_capacity, extra_capacity;
     size_t name_pos, extra_pos, comment_pos;
     uint16_t name_len, extra_len, comment_len, flags, method, disk16;
+    uint16_t modified_time, modified_date;
     uint32_t crc, compressed32, size32, offset32;
     uint64_t entries;
     uint64_t archive_size;
-    bool matching;
+    uint32_t name_flags;
+    bool matching, retaining_extra;
 };
 
 static int cd_fail(struct cd_parser *p, int error, const char *message)
@@ -331,26 +337,88 @@ static int cd_fail(struct cd_parser *p, int error, const char *message)
     return 1;
 }
 
-static int cd_finish_match(struct cd_parser *p)
+static int cd_resolve_entry(struct cd_parser *p, uint64_t *size,
+                            uint64_t *compressed, uint64_t *offset)
 {
-    uint64_t size, compressed, offset;
     uint32_t disk;
     int rc;
-    if ((p->flags & 0x0041u) != 0)
-        return cd_fail(p, ZGET_EUNSUPPORTED, "encrypted ZIP entries are unsupported");
-    if (p->method != 0 && p->method != 8)
-        return cd_fail(p, ZGET_ECOMPRESSION, "unsupported ZIP compression method");
+
     /*
-     * Central Directory sizes and CRC are the source of truth, including when
-     * the Local Header uses zeros because a data descriptor follows payload.
+     * ZIP64 values appear in the extra field only for saturated fixed fields.
+     * Resolve the complete tuple so malformed layouts and split-volume entries
+     * are rejected consistently by both lookup and listing.
      */
     rc = zget_zip_parse_zip64_extra(p->extra, p->extra_len,
                                     p->size32, p->compressed32, p->offset32,
-                                    p->disk16, &size, &compressed, &offset, &disk);
+                                    p->disk16, size, compressed, offset, &disk);
     if (rc != ZGET_OK)
         return cd_fail(p, ZGET_EZIP, "malformed ZIP64 entry extra field");
     if (disk != 0)
         return cd_fail(p, ZGET_EUNSUPPORTED, "multi-disk ZIP entries are unsupported");
+    return 0;
+}
+
+static int cd_emit_listing_entry(struct cd_parser *p)
+{
+    zget_member_info member;
+    uint64_t size, compressed, offset;
+    static const uint8_t month_days[] =
+        {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
+    unsigned int year, month, day, hour, minute, second, maximum_day;
+
+    if (cd_resolve_entry(p, &size, &compressed, &offset) != 0)
+        return 1;
+    (void)compressed;
+    (void)offset;
+    memset(&member, 0, sizeof(member));
+    member.struct_size = sizeof(member);
+    member.name = p->name_len == 0 ? "" : (const char *)p->name;
+    member.name_length = p->name_len;
+    member.uncompressed_size = size;
+    member.flags = p->name_flags;
+    /*
+     * DOS timestamps are local calendar values with no timezone. Preserve that
+     * honest representation instead of inventing an epoch or applying the
+     * machine's current timezone. Invalid packed fields remain unavailable.
+     */
+    year = 1980u + (p->modified_date >> 9);
+    month = (p->modified_date >> 5) & 0x0fu;
+    day = p->modified_date & 0x1fu;
+    hour = p->modified_time >> 11;
+    minute = (p->modified_time >> 5) & 0x3fu;
+    second = (p->modified_time & 0x1fu) * 2u;
+    if (month >= 1 && month <= 12) {
+        maximum_day = month_days[month - 1];
+        if (month == 2 && (year % 4u == 0) &&
+            (year % 100u != 0 || year % 400u == 0))
+            ++maximum_day;
+        if (day >= 1 && day <= maximum_day && hour <= 23 && minute <= 59 &&
+            second <= 59) {
+            member.modified_year = (uint16_t)year;
+            member.modified_month = (uint8_t)month;
+            member.modified_day = (uint8_t)day;
+            member.modified_hour = (uint8_t)hour;
+            member.modified_minute = (uint8_t)minute;
+            member.modified_second = (uint8_t)second;
+            member.flags |= ZGET_MEMBER_HAS_MODIFIED_TIME;
+        }
+    }
+    /* The borrowed name remains valid until this synchronous callback returns. */
+    if (p->list_cb(p->list_userdata, &member) != 0)
+        return cd_fail(p, ZGET_EIO, "listing callback rejected entry");
+    return 0;
+}
+
+static int cd_finish_match(struct cd_parser *p)
+{
+    uint64_t size, compressed, offset;
+
+    if ((p->flags & 0x0041u) != 0)
+        return cd_fail(p, ZGET_EUNSUPPORTED, "encrypted ZIP entries are unsupported");
+    if (p->method != 0 && p->method != 8)
+        return cd_fail(p, ZGET_ECOMPRESSION, "unsupported ZIP compression method");
+    if (cd_resolve_entry(p, &size, &compressed, &offset) != 0)
+        return 1;
     if (!zget_range_valid(offset, 30, p->archive_size))
         return cd_fail(p, ZGET_EZIP, "local header offset is outside the archive");
     p->result->compressed_size = compressed;
@@ -366,29 +434,36 @@ static int cd_finish_match(struct cd_parser *p)
 static int cd_name_done(struct cd_parser *p)
 {
     bool utf8 = (p->flags & (1u << 11)) != 0;
-    bool eligible = true;
+    bool match_eligible = true;
     size_t i;
+    unsigned char *larger;
+
     /*
      * UTF-8-flagged names must be well-formed. Legacy non-ASCII bytes are not
      * converted in v0.1, so they are deliberately ineligible for a match rather
-     * than compared under a locale or silently mistaken for UTF-8.
+     * than compared under a locale or silently mistaken for UTF-8. Listing may
+     * still expose those raw bytes, clearly marked for the CLI to escape.
      */
     if (utf8) {
         if (!zget_valid_utf8(p->name, p->name_len))
             return cd_fail(p, ZGET_EZIP, "entry name marked UTF-8 is invalid");
     } else {
         for (i = 0; i < p->name_len; ++i)
-            if (p->name[i] >= 0x80) { eligible = false; break; }
+            if (p->name[i] >= 0x80) { match_eligible = false; break; }
     }
-    p->matching = eligible && p->name_len == p->target_len &&
+    p->name_flags = (utf8 || match_eligible) ? ZGET_MEMBER_NAME_UTF8 : 0;
+    p->matching = p->target != NULL && match_eligible &&
+                  p->name_len == p->target_len &&
                   memcmp(p->name, p->target, p->target_len) == 0;
-    if (p->matching) {
-        /* ZIP64 extras matter only for the retained entry; all others are skipped. */
-        p->extra = malloc(p->extra_len == 0 ? 1 : p->extra_len);
-        if (p->extra == NULL)
+    p->retaining_extra = p->matching ||
+                         (p->list_cb != NULL && p->target == NULL);
+    if (p->retaining_extra && p->extra_len > p->extra_capacity) {
+        /* Reuse the largest buffer instead of allocating once per listed entry. */
+        larger = realloc(p->extra, p->extra_len);
+        if (larger == NULL)
             return cd_fail(p, ZGET_ENOMEM, "could not allocate extra-field buffer");
-    } else {
-        ++p->entries;
+        p->extra = larger;
+        p->extra_capacity = p->extra_len;
     }
     p->extra_pos = 0;
     p->state = CD_EXTRA;
@@ -397,8 +472,17 @@ static int cd_name_done(struct cd_parser *p)
 
 static int cd_extra_done(struct cd_parser *p)
 {
-    if (p->matching)
+    if (p->matching && p->result != NULL)
         return cd_finish_match(p);
+    if (p->list_cb != NULL && (p->target == NULL || p->matching)) {
+        if (cd_emit_listing_entry(p) != 0)
+            return 1;
+        if (p->matching) {
+            p->state = CD_COMPLETE;
+            return 0;
+        }
+    }
+    ++p->entries;
     p->comment_pos = 0;
     if (p->comment_len == 0) {
         p->have = 0;
@@ -419,6 +503,7 @@ static int cd_header_done(struct cd_parser *p)
     if (zget_zip_parse_cd_fixed(p->header, sizeof(p->header), &h) != ZGET_OK)
         return cd_fail(p, ZGET_EZIP, "invalid central directory signature");
     p->flags = h.flags; p->method = h.method; p->crc = h.crc32;
+    p->modified_time = h.modified_time; p->modified_date = h.modified_date;
     p->compressed32 = h.compressed_size; p->size32 = h.uncompressed_size;
     p->name_len = h.name_length; p->extra_len = h.extra_length;
     p->comment_len = h.comment_length; p->disk16 = h.disk;
@@ -474,7 +559,7 @@ static enum zget_source_action cd_write(void *opaque, const void *data,
             }
         } else if (p->state == CD_EXTRA) {
             need = p->extra_len - p->extra_pos; take = length < need ? length : need;
-            if (p->matching)
+            if (p->retaining_extra)
                 memcpy(p->extra + p->extra_pos, in, take);
             p->extra_pos += take; in += take; length -= take;
             if (p->extra_pos == p->extra_len) {
@@ -525,47 +610,104 @@ int zget_zip_fuzz_cd_stream(const unsigned char *data, size_t length,
     return (int)action;
 }
 
-static int zip_find_in_cd(struct zget_zip_format *zip, const char *member,
-                          zget_entry *entry)
+static int zip_walk_cd(struct zget_zip_format *zip, struct cd_parser *p)
 {
-    struct cd_parser p = {0};
     int rc;
-    p.zip = zip;
-    p.target = (const unsigned char *)member;
-    p.target_len = strlen(member);
-    p.result = entry;
-    p.state = CD_HEADER;
-    if (!zget_source_get_size(zip->format.source, &p.archive_size)) {
+
+    p->zip = zip;
+    p->state = CD_HEADER;
+    if (!zget_source_get_size(zip->format.source, &p->archive_size)) {
         zget_error_set(zip->format.error, ZGET_EINVAL,
                        "source size is unavailable");
         return ZGET_EINVAL;
     }
     if (zip->entry_count == 0) {
-        zget_error_set(zip->format.error, ZGET_ENOTFOUND, "member not found");
-        return ZGET_ENOTFOUND;
+        if (zip->cd_size == 0)
+            return ZGET_OK;
+        zget_error_set(zip->format.error, ZGET_EZIP,
+                       "empty central directory has unexpected data");
+        return ZGET_EZIP;
     }
+    if (zip->cd_size == 0) {
+        zget_error_set(zip->format.error, ZGET_EZIP,
+                       "central directory is missing");
+        return ZGET_EZIP;
+    }
+    rc = zget_source_read_range(zip->format.source,
+                                zip->cd_offset, zip->cd_size,
+                                cd_write, p);
+    /* Parser scratch storage is owned here on success, failure, and early stop. */
+    free(p->name);
+    free(p->extra);
+    p->name = NULL;
+    p->extra = NULL;
+    if (rc != ZGET_OK || p->state == CD_COMPLETE)
+        return rc;
+    if (p->state != CD_HEADER || p->have != 0 ||
+        p->entries != zip->entry_count) {
+        zget_error_set(zip->format.error, ZGET_EZIP,
+                       "central directory is truncated or inconsistent");
+        return ZGET_EZIP;
+    }
+    return ZGET_OK;
+}
+
+static int zip_find_in_cd(struct zget_zip_format *zip, const char *member,
+                          zget_entry *entry)
+{
+    struct cd_parser p = {0};
+    int rc;
+
+    p.target = (const unsigned char *)member;
+    p.target_len = strlen(member);
+    p.result = entry;
     /*
      * The first exact match wins by policy. The callback stops the source after
      * retaining its metadata, avoiding later entries without coupling ZIP to a
      * particular transport or exposing duplicate detection state.
      */
-    rc = zget_source_read_range(zip->format.source,
-                                zip->cd_offset, zip->cd_size,
-                                cd_write, &p);
-    /* Parser scratch storage is owned here on success, failure, and early stop. */
-    free(p.name);
-    free(p.extra);
+    rc = zip_walk_cd(zip, &p);
     if (p.state == CD_COMPLETE)
         return ZGET_OK;
     if (rc != ZGET_OK)
         return rc;
-    if (p.state != CD_HEADER || p.have != 0 ||
-        p.entries != zip->entry_count) {
-        zget_error_set(zip->format.error, ZGET_EZIP,
-                       "central directory is truncated or inconsistent");
-        return ZGET_EZIP;
-    }
     zget_error_set(zip->format.error, ZGET_ENOTFOUND, "member not found");
+    return ZGET_ENOTFOUND;
+}
+
+static int zip_validate_member(struct zget_format *format, const char *member)
+{
+    size_t length = strlen(member);
+
+    /* ZIP names are exact byte identifiers, never normalized filesystem paths. */
+    if (length == 0 || length > UINT16_MAX ||
+        !zget_valid_utf8((const unsigned char *)member, length)) {
+        zget_error_set(format->error, ZGET_EINVAL,
+                       "member path must be non-empty, valid UTF-8, and at most 65535 bytes");
+        return ZGET_EINVAL;
+    }
+    return ZGET_OK;
+}
+
+static int zip_list(struct zget_format *format, const char *member,
+                    zget_list_cb list_cb, void *userdata)
+{
+    struct zget_zip_format *zip = (struct zget_zip_format *)format;
+    struct cd_parser p = {0};
+    int rc;
+
+    p.list_cb = list_cb;
+    p.list_userdata = userdata;
+    if (member != NULL) {
+        if ((rc = zip_validate_member(format, member)) != ZGET_OK)
+            return rc;
+        p.target = (const unsigned char *)member;
+        p.target_len = strlen(member);
+    }
+    rc = zip_walk_cd(zip, &p);
+    if (rc != ZGET_OK || member == NULL || p.state == CD_COMPLETE)
+        return rc;
+    zget_error_set(format->error, ZGET_ENOTFOUND, "member not found");
     return ZGET_ENOTFOUND;
 }
 
@@ -634,19 +776,16 @@ static int zip_find(struct zget_format *format, const char *member,
                     zget_entry *entry)
 {
     struct zget_zip_format *zip = (struct zget_zip_format *)format;
-    size_t length = strlen(member);
+    int rc;
 
     /*
      * ZIP names are byte identifiers, not filesystem paths. Keep matching
      * exact and case-sensitive; normalization here could select a different
      * entry from the one named by the caller.
      */
-    if (length == 0 || length > UINT16_MAX ||
-        !zget_valid_utf8((const unsigned char *)member, length)) {
-        zget_error_set(format->error, ZGET_EINVAL,
-                       "member path must be non-empty, valid UTF-8, and at most 65535 bytes");
-        return ZGET_EINVAL;
-    }
+    rc = zip_validate_member(format, member);
+    if (rc != ZGET_OK)
+        return rc;
     return zip_find_in_cd(zip, member, entry);
 }
 
@@ -702,10 +841,11 @@ static void zip_close(struct zget_format *format)
 }
 
 static const struct zget_format_ops zip_ops = {
-    zip_extract_member,
-    zip_find,
-    zip_extract,
-    zip_close
+    .extract_member = zip_extract_member,
+    .list = zip_list,
+    .find = zip_find,
+    .extract = zip_extract,
+    .close = zip_close
 };
 
 int zget_zip_format_open(struct zget_source *source,

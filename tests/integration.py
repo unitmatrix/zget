@@ -34,6 +34,10 @@ def archive():
                    compress_type=zipfile.ZIP_DEFLATED)
         z.writestr("empty", b"", compress_type=zipfile.ZIP_STORED)
         z.writestr("unicod\u00e9.txt", "hello".encode(), compress_type=zipfile.ZIP_DEFLATED)
+        # Listing must keep one physical output line per hostile member name.
+        z.writestr("line\nbreak.txt", b"newline")
+        z.writestr("tab\tname.txt", b"tab")
+        z.writestr("back\\slash.txt", b"backslash")
         info = zipfile.ZipInfo("unknown-extra.txt")
         info.extra = b"\xfe\xca\x04\x00test"
         z.writestr(info, b"extra")
@@ -42,6 +46,15 @@ def archive():
             z.writestr(f"small/{i}", str(i).encode())
         # The maximum ZIP32 comment pushes EOCD discovery to its legal limit.
         z.comment = b"c" * 65535
+    return out.getvalue()
+
+
+def many_entry_archive(count=10_000):
+    """Build enough directory output to exceed any ordinary pipe buffer."""
+    out = io.BytesIO()
+    with zipfile.ZipFile(out, "w") as z:
+        for i in range(count):
+            z.writestr(f"listing/{i:05d}", b"")
     return out.getvalue()
 
 
@@ -152,7 +165,9 @@ def main(binary):
     data = archive()
 
     # Syntax failures must remain local and use the conventional usage status.
-    for arguments in ([], ["only-a-url"], ["-o"], ["-o", ""]):
+    for arguments in ([], ["only-a-url"], ["-o"], ["-o", ""], ["-l"], ["-1"],
+                      ["-l", "url", "member", "extra"],
+                      ["-1", "url", "member", "extra"]):
         result = subprocess.run([binary, *arguments], stdout=subprocess.PIPE,
                                 stderr=subprocess.PIPE)
         assert result.returncode == 2, (arguments, result.stderr)
@@ -177,7 +192,96 @@ def main(binary):
         result = subprocess.run([binary, url], stdout=subprocess.PIPE,
                                 stderr=subprocess.PIPE)
         assert result.returncode == 2
+        result = subprocess.run([binary, "-l", url, ""],
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        assert result.returncode == 2
+        result = subprocess.run([binary, "-1", url, ""],
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        assert result.returncode == 2
     assert run_server(data, "normal", empty_member) == 0
+
+    def listing(base):
+        """List every member in one metadata request with safe line escaping."""
+        result = subprocess.run([binary, "-l", base + "/archive.zip"],
+                                check=True, stdout=subprocess.PIPE)
+        lines = result.stdout.splitlines()
+        with zipfile.ZipFile(io.BytesIO(data)) as z:
+            infos = z.infolist()
+            total = sum(info.file_size for info in infos)
+            stored = z.getinfo("stored.txt")
+        year, month, day, hour, minute, _ = stored.date_time
+        stored_line = (f"{14:9d}  {month:02d}-{day:02d}-{year:04d} "
+                       f"{hour:02d}:{minute:02d}   stored.txt").encode()
+        assert lines[:2] == [b"  Length      Date    Time    Name",
+                             b"---------  ---------- -----   ----"]
+        assert stored_line in lines
+        assert "unicod\u00e9.txt".encode() in result.stdout
+        assert b"line\\nbreak.txt" in result.stdout
+        assert b"tab\\tname.txt" in result.stdout
+        assert b"back\\\\slash.txt" in result.stdout
+        assert len(lines) == len(infos) + 4
+        assert lines[-2] == b"---------                     -------"
+        assert lines[-1] == f"{total:9d}                     {len(infos)} files".encode()
+
+        # The short form contains exactly the safely escaped member names: no
+        # archive header, table headings, or summary are useful to its scripts.
+        short = subprocess.run([binary, "-1", base + "/archive.zip"],
+                               check=True, stdout=subprocess.PIPE)
+        short_lines = short.stdout.splitlines()
+        assert len(short_lines) == len(infos)
+        assert short_lines[0] == b"stored.txt"
+        assert "unicod\u00e9.txt".encode() in short_lines
+        assert b"line\\nbreak.txt" in short_lines
+        assert b"tab\\tname.txt" in short_lines
+        assert b"back\\\\slash.txt" in short_lines
+    # Each CLI process reads the tail, then streams the Central Directory once.
+    assert run_server(data, "normal", listing) == 4
+
+    def specific_listing(base):
+        """An exact listing emits one row and stops at the first name match."""
+        url = base + "/archive.zip"
+        result = subprocess.run([binary, "-l", url, "stored.txt"],
+                                check=True, stdout=subprocess.PIPE)
+        lines = result.stdout.splitlines()
+        assert lines[2].endswith(b"   stored.txt")
+        assert lines[2].startswith(f"{14:9d}  ".encode())
+        assert lines[-1] == f"{14:9d}                     1 file".encode()
+        assert len(lines) == 5
+        short = subprocess.run([binary, "-1", url, "stored.txt"],
+                               check=True, stdout=subprocess.PIPE)
+        assert short.stdout == b"stored.txt\n"
+        missing = subprocess.run([binary, "-l", url, "missing"],
+                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        assert missing.returncode != 0
+        assert b"member not found" in missing.stderr
+        short_missing = subprocess.run([binary, "-1", url, "missing"],
+                                       stdout=subprocess.PIPE,
+                                       stderr=subprocess.PIPE)
+        assert short_missing.returncode != 0
+        assert short_missing.stdout == b""
+        assert b"member not found" in short_missing.stderr
+    assert run_server(data, "normal", specific_listing) == 8
+
+    stored_cd = central_entry(data, "stored.txt")
+    invalid_date = mutate(data, stored_cd + 14, b"\x00\x00")
+
+    def unknown_timestamp_listing(base):
+        """Invalid packed dates remain visible as unknown instead of normalized."""
+        result = subprocess.run(
+            [binary, "-l", base + "/archive.zip", "stored.txt"],
+            check=True, stdout=subprocess.PIPE)
+        assert f"{14:9d}  ---------- -----   stored.txt".encode() in result.stdout
+    run_server(invalid_date, "normal", unknown_timestamp_listing)
+
+    def empty_listing(base):
+        """An empty archive needs no zero-length Central Directory request."""
+        result = subprocess.run([binary, "-l", base + "/archive.zip"],
+                                check=True, stdout=subprocess.PIPE)
+        assert result.stdout.endswith(b"        0                     0 files\n")
+        short = subprocess.run([binary, "-1", base + "/archive.zip"],
+                               check=True, stdout=subprocess.PIPE)
+        assert short.stdout == b""
+    assert run_server(empty_archive(), "normal", empty_listing) == 2
 
     def normal(base):
         """Cover codecs, redirects, varied names, and safe file publication."""
@@ -217,6 +321,18 @@ def main(binary):
         assert process.wait() == -signal.SIGPIPE
         assert stderr == b""
     run_server(data, "normal", broken_pipe)
+
+    def broken_listing_pipe(base):
+        """Closing a large listing cancels its metadata transfer via SIGPIPE."""
+        process = subprocess.Popen([binary, "-l", base + "/archive.zip"],
+                                   stdout=subprocess.PIPE,
+                                   stderr=subprocess.PIPE)
+        assert process.stdout.read(1) != b""
+        process.stdout.close()
+        stderr = process.stderr.read()
+        assert process.wait() == -signal.SIGPIPE
+        assert stderr == b""
+    run_server(many_entry_archive(), "normal", broken_listing_pipe)
 
     # A syntactically successful HTTP exchange is still rejected unless its
     # status, Content-Range, and actual body length describe the requested bytes.
@@ -322,6 +438,10 @@ def main(binary):
         result = subprocess.run([binary, base + "/archive.zip", "same"],
                                 check=True, stdout=subprocess.PIPE)
         assert result.stdout == b"first"
+        result = subprocess.run([binary, "-l", base + "/archive.zip", "same"],
+                                check=True, stdout=subprocess.PIPE)
+        assert f"{5:9d}  ".encode() in result.stdout
+        assert result.stdout.endswith(f"{5:9d}                     1 file\n".encode())
     run_server(duplicates.getvalue(), "normal", duplicate)
 
     unicode_cd = central_entry(data, "unicod\u00e9.txt")
@@ -330,6 +450,29 @@ def main(binary):
     # that entry is not the requested one.
     invalid_name = mutate(data, unicode_cd + 46 + len(unicode_name) - 1, b"\xff")
     expect_failure(invalid_name, member="missing")
+
+    def invalid_listing(base):
+        """Reject a malformed name whose Central Directory claims UTF-8."""
+        result = subprocess.run([binary, "-l", base + "/archive.zip"],
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        assert result.returncode != 0
+    run_server(invalid_name, "normal", invalid_listing)
+
+    # Legacy high bytes have no trustworthy text encoding in current scope.
+    # Listing preserves them visibly as byte escapes instead of guessing CP437.
+    legacy_name = bytearray(data)
+    legacy_flags = int.from_bytes(legacy_name[unicode_cd + 8:unicode_cd + 10],
+                                  "little") & ~(1 << 11)
+    legacy_name[unicode_cd + 8:unicode_cd + 10] = legacy_flags.to_bytes(2, "little")
+    high = unicode_cd + 46 + len("unicod")
+    legacy_name[high:high + 2] = b"\x82\xa0"
+
+    def legacy_listing(base):
+        """Escape raw legacy bytes while keeping the rest of the listing usable."""
+        result = subprocess.run([binary, "-l", base + "/archive.zip"],
+                                check=True, stdout=subprocess.PIPE)
+        assert b"unicod\\x82\\xa0.txt" in result.stdout
+    run_server(bytes(legacy_name), "normal", legacy_listing)
 
     def missing(base):
         """Verify lookup failure after scanning a non-empty directory."""
