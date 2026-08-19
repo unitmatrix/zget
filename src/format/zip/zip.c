@@ -679,12 +679,30 @@ static int zip_extract(struct zget_format *format, const zget_entry *entry,
                                     write_cb, userdata);
 }
 
+static int zip_extract_member(struct zget_format *format, const char *member,
+                              zget_write_cb write_cb, void *userdata)
+{
+    zget_entry entry;
+    int rc;
+
+    /*
+     * Keep the ZIP locator on the stack: the format-neutral public operation
+     * needs no caller-visible allocation or lifetime beyond this extraction.
+     */
+    memset(&entry, 0, sizeof(entry));
+    rc = zip_find(format, member, &entry);
+    if (rc != ZGET_OK)
+        return rc;
+    return zip_extract(format, &entry, write_cb, userdata);
+}
+
 static void zip_close(struct zget_format *format)
 {
     free((struct zget_zip_format *)format);
 }
 
 static const struct zget_format_ops zip_ops = {
+    zip_extract_member,
     zip_find,
     zip_extract,
     zip_close

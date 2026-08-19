@@ -166,6 +166,13 @@ int main(void)
         memcmp(output.data, "hello", 5) != 0 || memory.reads != 4)
         goto fail;
 
+    /* The preferred operation keeps the ZIP locator inside the engine. */
+    memset(&output, 0, sizeof(output));
+    rc = zget_format_extract_member(format, "a.txt", collect, &output);
+    if (rc != ZGET_OK || output.length != 5 ||
+        memcmp(output.data, "hello", 5) != 0 || memory.reads != 7)
+        goto fail;
+
     zget_format_close(format);
     zget_source_close(&memory.source);
     return memory.closed ? 0 : 1;

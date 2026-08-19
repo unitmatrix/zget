@@ -66,8 +66,9 @@ typedef struct zget_options {
     (offsetof(zget_options, max_redirects) + sizeof(uint32_t))
 
 /*
- * Extraction metadata returned by zget_find(). Fields are public for ABI
- * simplicity, but callers should pass the structure back unchanged.
+ * ZIP extraction metadata retained for v0.1 source and binary compatibility.
+ * New code that only needs a named member should use zget_extract_member().
+ * Callers using this structure must pass it back unchanged.
  */
 typedef struct zget_entry {
     uint64_t compressed_size;
@@ -113,13 +114,22 @@ ZGET_API int zget_open_url_ex(const char *archive_url,
                               zget_ctx **out_ctx);
 
 /*
- * entry receives only the metadata needed to fetch and validate one member.
- * It is cleared before validation and remains zeroed when the lookup fails.
+ * Locate one exact member through the selected format engine and stream its
+ * validated contents. Reusing a context avoids reopening the remote object;
+ * each call still performs the format's metadata lookup for that member.
+ */
+ZGET_API int zget_extract_member(zget_ctx *ctx, const char *member_path,
+                                 zget_write_cb write_cb, void *userdata);
+
+/*
+ * v0.1 ZIP compatibility API. entry receives the ZIP metadata needed to fetch
+ * and validate one member. It is cleared before validation and remains zeroed
+ * when lookup fails.
  */
 ZGET_API int zget_find(zget_ctx *ctx, const char *member_path,
                        zget_entry *entry);
 
-/* Stream exactly entry's uncompressed bytes; no archive-sized buffer is used. */
+/* Stream a ZIP entry returned by zget_find(); no archive-sized buffer is used. */
 ZGET_API int zget_extract(zget_ctx *ctx, const zget_entry *entry,
                           zget_write_cb write_cb, void *userdata);
 ZGET_API int zget_get(const char *archive_url, const char *member_path,

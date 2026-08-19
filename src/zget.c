@@ -144,6 +144,19 @@ zget_ctx *zget_open_url(const char *archive_url, const zget_options *options)
     return ctx;
 }
 
+int zget_extract_member(zget_ctx *ctx, const char *member_path,
+                        zget_write_cb write_cb, void *userdata)
+{
+    if (ctx == NULL || member_path == NULL || write_cb == NULL)
+        return ZGET_EINVAL;
+    if (!ctx->ready)
+        return ctx->error.code != ZGET_OK ? ctx->error.code : ZGET_EINVAL;
+    ctx->error.code = ZGET_OK;
+    ctx->error.message[0] = '\0';
+    return zget_format_extract_member(ctx->format, member_path,
+                                      write_cb, userdata);
+}
+
 int zget_find(zget_ctx *ctx, const char *member_path, zget_entry *entry)
 {
     /*
@@ -177,7 +190,6 @@ int zget_get(const char *archive_url, const char *member_path,
              zget_write_cb write_cb, void *userdata)
 {
     zget_ctx *ctx = NULL;
-    zget_entry entry;
     int rc;
     /* Reject invalid convenience-API arguments before they can cause I/O. */
     if (archive_url == NULL || archive_url[0] == '\0' || member_path == NULL ||
@@ -185,9 +197,7 @@ int zget_get(const char *archive_url, const char *member_path,
         return ZGET_EINVAL;
     rc = zget_open_url_ex(archive_url, NULL, &ctx);
     if (rc == ZGET_OK)
-        rc = zget_find(ctx, member_path, &entry);
-    if (rc == ZGET_OK)
-        rc = zget_extract(ctx, &entry, write_cb, userdata);
+        rc = zget_extract_member(ctx, member_path, write_cb, userdata);
     zget_close(ctx);
     return rc;
 }

@@ -32,6 +32,16 @@ int zget_format_open(struct zget_source *source,
     return zget_zip_format_open(source, options, error, out_format);
 }
 
+int zget_format_extract_member(struct zget_format *format, const char *member,
+                               zget_write_cb write_cb, void *userdata)
+{
+    if (format == NULL || format->ops == NULL ||
+        format->ops->extract_member == NULL || member == NULL ||
+        write_cb == NULL)
+        return ZGET_EINVAL;
+    return format->ops->extract_member(format, member, write_cb, userdata);
+}
+
 int zget_format_find(struct zget_format *format, const char *member,
                      zget_entry *entry)
 {

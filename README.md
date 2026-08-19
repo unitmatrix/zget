@@ -96,6 +96,12 @@ inspect it with `zget_last_error_message()` and always release it with
 failure is needed. A context must not be used concurrently; after global
 initialization, different contexts may be used by different threads.
 
+Use `zget_extract_member()` to locate and stream an exact member through an
+open context. The context can be reused for additional members without
+reopening the remote object. `zget_get()` is the one-call convenience form.
+The original `zget_find()` and `zget_extract()` pair remains available for
+source and binary compatibility with applications that use ZIP metadata.
+
 `max_output_size`, `max_metadata_bytes`, and `max_http_requests` let embedding
 applications impose defensive limits. The CLI leaves output and metadata sizes
 unrestricted. Always start with `zget_options_init()`; the recorded structure

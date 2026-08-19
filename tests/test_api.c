@@ -14,6 +14,30 @@ static int bytes_are_zero(const void *data, size_t size)
     return 1;
 }
 
+static int discard(void *userdata, const void *data, size_t size)
+{
+    (void)userdata;
+    (void)data;
+    (void)size;
+    return 0;
+}
+
+static int expect_entry_v1_layout(void)
+{
+    /* Existing binaries pass this structure by address, so offsets are ABI. */
+    if (sizeof(zget_entry) != 32 ||
+        offsetof(zget_entry, compressed_size) != 0 ||
+        offsetof(zget_entry, uncompressed_size) != 8 ||
+        offsetof(zget_entry, local_header_offset) != 16 ||
+        offsetof(zget_entry, crc32) != 24 ||
+        offsetof(zget_entry, compression_method) != 28 ||
+        offsetof(zget_entry, flags) != 30) {
+        fprintf(stderr, "zget_entry v0.1 ABI layout changed\n");
+        return 1;
+    }
+    return 0;
+}
+
 static int expect_open_clears_context(const char *url)
 {
     /* A non-NULL sentinel makes failure to replace the caller's value visible. */
@@ -51,5 +75,10 @@ int main(void)
     failed |= expect_open_clears_context(NULL);
     failed |= expect_open_clears_context("");
     failed |= expect_find_clears_entry();
+    failed |= expect_entry_v1_layout();
+    if (zget_extract_member(NULL, "member", discard, NULL) != ZGET_EINVAL) {
+        fprintf(stderr, "extract-member accepted a NULL context\n");
+        failed = 1;
+    }
     return failed ? 1 : 0;
 }
