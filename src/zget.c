@@ -61,14 +61,23 @@ void zget_options_init(zget_options *options)
 
 static int copy_options(struct zget_ctx *ctx, const zget_options *options)
 {
+    size_t copy_size;
+
+    /* Defaults survive for every field beyond the caller's struct_size. */
     zget_options_init(&ctx->options);
     if (options == NULL)
         return ZGET_OK;
-    if (options->struct_size < sizeof(*options)) {
+    if (options->struct_size < ZGET_OPTIONS_V1_SIZE) {
         zget_set_error(ctx, ZGET_EINVAL, "zget_options struct is too small");
         return ZGET_EINVAL;
     }
-    ctx->options = *options;
+    copy_size = options->struct_size;
+    if (copy_size > sizeof(ctx->options))
+        copy_size = sizeof(ctx->options);
+    memcpy(&ctx->options, options, copy_size);
+
+    /* Internal code always sees the library's complete, normalized structure. */
+    ctx->options.struct_size = sizeof(ctx->options);
     if (ctx->options.max_metadata_bytes == 0)
         ctx->options.max_metadata_bytes = ZGET_DEFAULT_METADATA;
     if (ctx->options.max_redirects == 0)

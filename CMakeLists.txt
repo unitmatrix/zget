@@ -94,6 +94,11 @@ if(BUILD_TESTING)
     target_link_libraries(zget_lifecycle_tests PRIVATE Zget::libzget_static)
     add_test(NAME lifecycle COMMAND zget_lifecycle_tests)
 
+    # Verify that struct_size remains a real ABI boundary as options grow.
+    add_executable(zget_options_tests tests/test_options.c)
+    target_link_libraries(zget_options_tests PRIVATE Zget::libzget_static)
+    add_test(NAME options COMMAND zget_options_tests)
+
     find_package(Python3 COMPONENTS Interpreter)
     if(Python3_Interpreter_FOUND AND ZGET_BUILD_REFERENCE_TESTS)
         add_test(NAME integration_reference
