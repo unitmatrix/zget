@@ -48,6 +48,40 @@ typedef enum zget_error {
  */
 typedef int (*zget_write_cb)(void *userdata, const void *data, size_t size);
 
+/* The member name is known to be valid UTF-8, rather than legacy raw bytes. */
+#define ZGET_MEMBER_NAME_UTF8 0x00000001u
+/* The local calendar components below contain a validated modification time. */
+#define ZGET_MEMBER_HAS_MODIFIED_TIME 0x00000002u
+
+/*
+ * One format-neutral member record produced during a streaming listing.
+ * struct_size records the bytes supplied by the running library so fields can
+ * be appended compatibly. name is borrowed, is not necessarily NUL-terminated,
+ * and remains valid only until the callback returns. When the UTF-8 flag is
+ * absent, consumers should preserve or escape the bytes instead of guessing a
+ * legacy encoding. Unknown flag bits must be ignored.
+ */
+typedef struct zget_member_info {
+    size_t struct_size;
+    const char *name;
+    size_t name_length;
+    uint64_t uncompressed_size;
+    uint32_t flags;
+    uint16_t modified_year;
+    uint8_t modified_month;
+    uint8_t modified_day;
+    uint8_t modified_hour;
+    uint8_t modified_minute;
+    uint8_t modified_second;
+} zget_member_info;
+
+/* Frozen boundary of the fields published with the listing API. */
+#define ZGET_MEMBER_INFO_V1_SIZE \
+    (offsetof(zget_member_info, modified_second) + sizeof(uint8_t))
+
+/* Return zero to continue listing; any other value aborts with ZGET_EIO. */
+typedef int (*zget_list_cb)(void *userdata, const zget_member_info *member);
+
 /*
  * This structure is append-only. zget_options_init() records the caller's
  * known size so newer libraries can preserve defaults for fields that were not
@@ -120,6 +154,14 @@ ZGET_API int zget_open_url_ex(const char *archive_url,
  */
 ZGET_API int zget_extract_member(zget_ctx *ctx, const char *member_path,
                                  zget_write_cb write_cb, void *userdata);
+
+/*
+ * Stream member metadata through the selected format engine. A NULL
+ * member_path lists every member; a non-NULL path emits the first exact match
+ * and stops the metadata transfer. Only one member record is live at a time.
+ */
+ZGET_API int zget_list(zget_ctx *ctx, const char *member_path,
+                       zget_list_cb list_cb, void *userdata);
 
 /*
  * v0.1 ZIP compatibility API. entry receives the ZIP metadata needed to fetch

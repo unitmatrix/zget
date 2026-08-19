@@ -8,6 +8,16 @@ zget \- fetch one member from a remote ZIP archive
 .I URL MEMBER
 .br
 .B zget
+.B \-l
+.I URL
+.RI [ MEMBER ]
+.br
+.B zget
+.B \-1
+.I URL
+.RI [ MEMBER ]
+.br
+.B zget
 .RB [ \-h | \-\-help ]
 .br
 .B zget
@@ -24,9 +34,9 @@ the archive entry count. The Central Directory transfer stops when the first
 exact name match is found. The member payload is then streamed through STORE
 or raw-DEFLATE decoding and checked against its ZIP CRC32.
 .PP
-Both
+For extraction, both a
 .I URL
-and
+and an exact
 .I MEMBER
 are required; a URL by itself does not request an archive listing.
 .PP
@@ -35,12 +45,39 @@ By default, member data is written to standard output. When
 is used, output is first written to a temporary file in the destination
 directory. The destination is published only after extraction and CRC
 validation succeed, and an existing path is never overwritten.
+.PP
+.B \-l
+streams a listing directly from the Central Directory. Each output row contains
+the uncompressed length, ZIP-local modification date and time, and member name
+in a layout inspired by
+.BR unzip (1).
+ZIP timestamps have no timezone; invalid packed timestamps are shown as dashes.
+Control characters, backslashes, and legacy non-UTF-8 bytes are escaped so an
+archive name cannot create additional terminal lines. Listing memory use is
+independent of the entry count.
+.PP
+.B \-1
+uses the same streaming lookup but writes only member names, one per line,
+without a header or totals. Names receive the same safe escaping as the table
+listing. This form follows the convention established by
+.BR zipinfo (1).
 .SH OPTIONS
 .TP
 .BI \-o " FILE"
 Write the member to
 .I FILE
 instead of standard output.
+.TP
+.B \-l
+List archive members to standard output. With
+.IR MEMBER ,
+emit the first exact match and stop; otherwise emit every member. A URL without
+this explicit option does not imply listing.
+.TP
+.B \-1
+List only archive member names, one per line. With
+.IR MEMBER ,
+emit the first exact match and stop; otherwise emit every member.
 .TP
 .BR \-h , " " \-\-help
 Show command usage and exit.
@@ -56,7 +93,7 @@ same archive version.
 .SH EXIT STATUS
 .TP
 .B 0
-The member was extracted successfully.
+The requested extraction or listing completed successfully.
 .TP
 .B 1
 An HTTP, ZIP, integrity, compression, output, or resource-limit error occurred.
@@ -67,19 +104,37 @@ The command line was invalid.
 Write a member to standard output:
 .PP
 .nf
-zget https://example.com/archive.zip path/to/file.iso
+zget https://example.com/archive.zip README.txt
 .fi
 .PP
 Publish a validated member as a local file:
 .PP
 .nf
-zget -o file.iso https://example.com/archive.zip path/to/file.iso
+zget -o report.pdf https://example.com/documents.zip path/to/report.pdf
 .fi
 .PP
 Process a member as a stream:
 .PP
 .nf
 zget https://example.com/data.zip config.json | jq .
+.fi
+.PP
+Stream the archive listing:
+.PP
+.nf
+zget -l https://example.com/archive.zip
+.fi
+.PP
+List one exact member without extracting it:
+.PP
+.nf
+zget -l https://example.com/documents.zip path/to/report.pdf
+.fi
+.PP
+List only member names:
+.PP
+.nf
+zget -1 https://example.com/archive.zip
 .fi
 .SH LIMITATIONS
 Only single-volume ZIP32 and ZIP64 archives are supported. Member names are
@@ -88,4 +143,5 @@ methods are limited to STORE and DEFLATE. Encryption and split archives are
 not supported.
 .SH SEE ALSO
 .BR curl (1),
-.BR unzip (1)
+.BR unzip (1),
+.BR zipinfo (1)

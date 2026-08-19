@@ -6,8 +6,11 @@ Designed for very large ZIP/ZIP64 archives, with streaming Central Directory
 parsing and memory usage independent of archive entry count.
 
 ```sh
-zget https://example.com/archive.zip path/to/file.iso
-zget -o file.iso https://example.com/archive.zip path/to/file.iso
+zget https://example.com/archive.zip README.txt
+zget -o report.pdf https://example.com/documents.zip path/to/report.pdf
+zget -l https://example.com/archive.zip
+zget -l https://example.com/documents.zip path/to/report.pdf
+zget -1 https://example.com/archive.zip
 zget https://example.com/data.zip config.json | jq .
 ```
 
@@ -15,14 +18,28 @@ zget https://example.com/data.zip config.json | jq .
 
 ```text
 zget [-o FILE] URL MEMBER
+zget -l URL [MEMBER]
+zget -1 URL [MEMBER]
 ```
 
 Member data goes to standard output by default. `-o FILE` instead writes to a
 chosen path, validates the complete extraction before publishing it, and
 refuses to overwrite an existing path.
 
-The URL and exact member name are both required. A URL without a member is a
-usage error rather than an implicit request to list the archive.
+Extraction requires both a URL and an exact member name. A URL without a member
+is a usage error rather than an implicit request to list the archive; use `-l`
+explicitly to stream all entries, or add `MEMBER` to list one exact match.
+
+Listings use the familiar `unzip -l` columns: uncompressed length, ZIP-local
+modification date and time, and member name. ZIP timestamps have no timezone;
+invalid packed timestamps are shown as dashes rather than normalized. Listings
+scan the Central Directory once and retain only the current entry. Control
+characters, backslashes, and legacy non-UTF-8 name bytes are escaped so every
+member stays on one safe output line.
+
+For a compact listing, `-1` writes only member names, one per line, with no
+header or totals. It accepts the same optional exact `MEMBER` as `-l` and uses
+the same safe escaping. This form follows the familiar `zipinfo -1` convention.
 
 ## Why zget?
 
@@ -112,6 +129,10 @@ initialization, different contexts may be used by different threads.
 Use `zget_extract_member()` to locate and stream an exact member through an
 open context. The context can be reused for additional members without
 reopening the remote object. `zget_get()` is the one-call convenience form.
+Use `zget_list()` to receive one borrowed, length-delimited member record at a
+time without constructing an archive-wide index. Its optional exact member
+argument stops the metadata scan at the first match. Validated modification
+components remain local calendar values because ZIP stores no timezone.
 The original `zget_find()` and `zget_extract()` pair remains available for
 source and binary compatibility with applications that use ZIP metadata.
 
@@ -133,15 +154,15 @@ is best-effort and still checks the object size.
 after decompression and CRC validation. Existing paths are never overwritten.
 Stdout cannot be rolled back if a late error occurs.
 
-## v0.1 scope
+## Scope
 
 - Exact, case-sensitive full member paths; no normalization or globbing.
 - Single-volume ZIP32 and ZIP64, including data descriptors.
 - Compression methods STORE (0) and DEFLATE (8) only.
 - UTF-8-flagged names must be valid UTF-8. Legacy names are eligible for exact
   matching only when entirely ASCII; CP437 conversion is intentionally absent.
-- No encryption, split archives, listing UI, resume, or random seeks within a
-  DEFLATE member.
+- No encryption, split archives, resume, or random seeks within a DEFLATE
+  member.
 - HTTP Range support is mandatory; there is no full-download fallback.
 
 This project is MIT licensed.

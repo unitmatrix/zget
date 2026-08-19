@@ -157,6 +157,18 @@ int zget_extract_member(zget_ctx *ctx, const char *member_path,
                                       write_cb, userdata);
 }
 
+int zget_list(zget_ctx *ctx, const char *member_path,
+              zget_list_cb list_cb, void *userdata)
+{
+    if (ctx == NULL || list_cb == NULL)
+        return ZGET_EINVAL;
+    if (!ctx->ready)
+        return ctx->error.code != ZGET_OK ? ctx->error.code : ZGET_EINVAL;
+    ctx->error.code = ZGET_OK;
+    ctx->error.message[0] = '\0';
+    return zget_format_list(ctx->format, member_path, list_cb, userdata);
+}
+
 int zget_find(zget_ctx *ctx, const char *member_path, zget_entry *entry)
 {
     /*
