@@ -1,7 +1,37 @@
 #include "internal.h"
 
+#include <limits.h>
 #include <stdlib.h>
 #include <string.h>
+
+/*
+ * Global initialization is owned by the embedding application rather than by
+ * individual contexts. Keep our count aligned with libcurl's own acquisition
+ * count so zget composes safely with other libraries that also use libcurl.
+ *
+ * This counter intentionally needs no lock: the public contract requires init
+ * and cleanup during single-threaded startup and shutdown. Between those
+ * phases it is read-only, so distinct contexts can be used by distinct threads.
+ */
+static unsigned int global_references;
+
+int zget_global_init(void)
+{
+    if (global_references == UINT_MAX)
+        return ZGET_ELIMIT;
+    if (curl_global_init(CURL_GLOBAL_DEFAULT) != CURLE_OK)
+        return ZGET_EHTTP;
+    ++global_references;
+    return ZGET_OK;
+}
+
+void zget_global_cleanup(void)
+{
+    if (global_references == 0)
+        return;
+    --global_references;
+    curl_global_cleanup();
+}
 
 struct tail_buffer {
     unsigned char *data;
@@ -61,6 +91,8 @@ int zget_open_url_ex(const char *archive_url, const zget_options *options,
     if (out_ctx == NULL || archive_url == NULL || archive_url[0] == '\0')
         return ZGET_EINVAL;
     *out_ctx = NULL;
+    if (global_references == 0)
+        return ZGET_ENOTINITIALIZED;
     ctx = calloc(1, sizeof(*ctx));
     if (ctx == NULL)
         return ZGET_ENOMEM;
@@ -71,11 +103,6 @@ int zget_open_url_ex(const char *archive_url, const zget_options *options,
     }
     if ((rc = copy_options(ctx, options)) != ZGET_OK)
         goto fail;
-    if (curl_global_init(CURL_GLOBAL_DEFAULT) != CURLE_OK) {
-        zget_set_error(ctx, ZGET_EHTTP, "could not initialize libcurl");
-        rc = ZGET_EHTTP;
-        goto fail;
-    }
     if ((rc = zget_http_init(ctx)) != ZGET_OK)
         goto fail;
     /* ZIP consumes ranges through the source abstraction, never through curl. */
@@ -200,20 +227,14 @@ int zget_get(const char *archive_url, const char *member_path,
 
 void zget_close(zget_ctx *ctx)
 {
-    /* All context-owned allocations, including failed-open state, end here. */
+    /*
+     * Only context-owned state ends here. Process-wide libcurl state is paired
+     * by zget_global_init()/zget_global_cleanup(), never by a context destructor.
+     */
     if (ctx == NULL)
         return;
     if (ctx->curl != NULL)
         curl_easy_cleanup(ctx->curl);
-    /*
-     * Do not call curl_global_cleanup() here. libcurl's global state belongs
-     * to the process, not to one zget context. A caller may have several
-     * contexts alive at once, and closing any one of them must not tear down
-     * state still needed by the others. The process will reclaim this small
-     * global allocation set on exit; avoiding cleanup is also the portable way
-     * to keep independent contexts safe without imposing a threading API on
-     * this C99 library.
-     */
     free(ctx->url);
     free(ctx->effective_url);
     free(ctx->strong_etag);
@@ -237,7 +258,7 @@ const char *zget_error_string(int error)
         "remote object changed", "malformed ZIP", "unsupported ZIP feature",
         "member not found", "unsupported compression", "CRC32 mismatch",
         "decompression error", "output I/O error", "resource limit exceeded",
-        "out of memory"
+        "out of memory", "zget is not initialized"
     };
     return error >= 0 && (size_t)error < sizeof(messages) / sizeof(messages[0]) ?
            messages[error] : "unknown zget error";

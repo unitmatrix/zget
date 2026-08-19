@@ -87,6 +87,13 @@ if(BUILD_TESTING)
     target_include_directories(zget_unit_tests PRIVATE src include
         "${ZGET_GENERATED_INCLUDE_DIR}")
     add_test(NAME unit COMMAND zget_unit_tests)
+
+    # Exercise the public process lifecycle through the same static library
+    # embedded by the CLI; this catches accidental per-context initialization.
+    add_executable(zget_lifecycle_tests tests/test_lifecycle.c)
+    target_link_libraries(zget_lifecycle_tests PRIVATE Zget::libzget_static)
+    add_test(NAME lifecycle COMMAND zget_lifecycle_tests)
+
     find_package(Python3 COMPONENTS Interpreter)
     if(Python3_Interpreter_FOUND AND ZGET_BUILD_REFERENCE_TESTS)
         add_test(NAME integration_reference
