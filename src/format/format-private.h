@@ -4,6 +4,14 @@
 #include "format/format.h"
 
 struct zget_format_ops {
+    /* Core operation: no format-specific locator crosses this boundary. */
+    int (*extract_member)(struct zget_format *format, const char *member,
+                          zget_write_cb write_cb, void *userdata);
+
+    /*
+     * These hooks preserve the v0.1 ZIP metadata API. New format engines need
+     * not encode their locators into zget_entry to implement extract_member.
+     */
     int (*find)(struct zget_format *format, const char *member,
                 zget_entry *entry);
     int (*extract)(struct zget_format *format, const zget_entry *entry,
