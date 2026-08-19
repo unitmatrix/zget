@@ -8,6 +8,7 @@ cannot emit directly without allocating multi-gigabyte fixtures.
 
 import io
 import os
+import signal
 import subprocess
 import struct
 import sys
@@ -26,6 +27,10 @@ def archive():
     with zipfile.ZipFile(out, "w") as z:
         z.writestr("stored.txt", b"stored payload", compress_type=zipfile.ZIP_STORED)
         z.writestr("nested/deflated.txt", b"deflated payload " * 100,
+                   compress_type=zipfile.ZIP_DEFLATED)
+        # A large decoded stream reliably reaches a closed pipe before it can
+        # fit in the kernel buffer, while compressing to a tiny test fixture.
+        z.writestr("pipe.bin", b"x" * (2 * 1024 * 1024),
                    compress_type=zipfile.ZIP_DEFLATED)
         z.writestr("empty", b"", compress_type=zipfile.ZIP_STORED)
         z.writestr("unicod\u00e9.txt", "hello".encode(), compress_type=zipfile.ZIP_DEFLATED)
@@ -146,6 +151,16 @@ def main(binary):
     """Run the hermetic end-to-end CLI behavior and rejection cases."""
     data = archive()
 
+    # Syntax failures must remain local and use the conventional usage status.
+    for arguments in ([], ["only-a-url"], ["-o"], ["-o", ""]):
+        result = subprocess.run([binary, *arguments], stdout=subprocess.PIPE,
+                                stderr=subprocess.PIPE)
+        assert result.returncode == 2, (arguments, result.stderr)
+    help_result = subprocess.run([binary, "--help"], stdout=subprocess.PIPE)
+    assert help_result.returncode == 0 and b"[-o FILE]" in help_result.stdout
+    version_result = subprocess.run([binary, "--version"], stdout=subprocess.PIPE)
+    assert version_result.returncode == 0 and version_result.stdout.startswith(b"zget ")
+
     # URL syntax and scheme policy are resolved before any network operation.
     for invalid_url in ("not-a-url", "http://", "ftp://127.0.0.1/archive.zip"):
         result = subprocess.run([binary, invalid_url, "stored.txt"],
@@ -154,10 +169,14 @@ def main(binary):
 
     def empty_member(base):
         """Verify invalid input fails before the archive-tail Range request."""
-        result = subprocess.run([binary, base + "/archive.zip", ""],
-                                stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        url = base + "/archive.zip"
+        result = subprocess.run([binary, url, ""], stdout=subprocess.PIPE,
+                                stderr=subprocess.PIPE)
         assert result.returncode == 2
         assert b"member path must not be empty" in result.stderr
+        result = subprocess.run([binary, url], stdout=subprocess.PIPE,
+                                stderr=subprocess.PIPE)
+        assert result.returncode == 2
     assert run_server(data, "normal", empty_member) == 0
 
     def normal(base):
@@ -186,6 +205,18 @@ def main(binary):
                 [binary, "-o", path, base + "/archive.zip", "stored.txt"])
             assert again.returncode != 0
     run_server(data, "normal", normal)
+
+    def broken_pipe(base):
+        """A closed stdout reader should trigger quiet, conventional SIGPIPE."""
+        process = subprocess.Popen(
+            [binary, base + "/archive.zip", "pipe.bin"],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        assert process.stdout.read(1) == b"x"
+        process.stdout.close()
+        stderr = process.stderr.read()
+        assert process.wait() == -signal.SIGPIPE
+        assert stderr == b""
+    run_server(data, "normal", broken_pipe)
 
     # A syntactically successful HTTP exchange is still rejected unless its
     # status, Content-Range, and actual body length describe the requested bytes.

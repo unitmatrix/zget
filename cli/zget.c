@@ -1,19 +1,29 @@
 #include "zget.h"
 
 #include <errno.h>
+#include <signal.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
 #include <unistd.h>
-#include <stdint.h>
 
-struct file_output { FILE *file; };
+struct file_output {
+    FILE *file;
+    int broken_pipe;
+};
 
 static int write_file(void *opaque, const void *data, size_t size)
 {
     struct file_output *out = opaque;
-    return fwrite(data, 1, size, out->file) == size ? 0 : 1;
+
+    errno = 0;
+    if (fwrite(data, 1, size, out->file) == size)
+        return 0;
+    if (errno == EPIPE)
+        out->broken_pipe = 1;
+    return 1;
 }
 
 static void usage(FILE *file)
@@ -23,7 +33,7 @@ static void usage(FILE *file)
 
 static char *temporary_name(const char *path)
 {
-    /* Same-directory placement makes final publication a single-filesystem operation. */
+    /* Same-directory placement keeps final publication on one filesystem. */
     const char *slash = strrchr(path, '/');
     const char *base = slash == NULL ? path : slash + 1;
     size_t dir_len = slash == NULL ? 0 : (size_t)(slash - path + 1);
@@ -42,9 +52,8 @@ int main(int argc, char **argv)
     const char *output_path = NULL, *url, *member;
     char *temp_path = NULL;
     struct stat st;
-    struct file_output output = {stdout};
+    struct file_output output = {stdout, 0};
     zget_ctx *ctx = NULL;
-    zget_entry entry;
     zget_options options;
     int arg = 1, fd = -1, rc, exit_status = 1;
 
@@ -57,7 +66,10 @@ int main(int argc, char **argv)
         return 0;
     }
     if (arg < argc && !strcmp(argv[arg], "-o")) {
-        if (++arg >= argc) { usage(stderr); return 2; }
+        if (++arg >= argc || argv[arg][0] == '\0') {
+            usage(stderr);
+            return 2;
+        }
         output_path = argv[arg++];
     }
     if (argc - arg != 2) { usage(stderr); return 2; }
@@ -68,20 +80,28 @@ int main(int argc, char **argv)
         return 2;
     }
 
+#ifdef SIGPIPE
+    /*
+     * Shell pipelines expect a writer to terminate quietly when its reader
+     * exits. Reset an inherited ignored disposition so fwrite cannot turn that
+     * ordinary condition into a noisy libzget output error.
+     */
+    if (signal(SIGPIPE, SIG_DFL) == SIG_ERR) {
+        fprintf(stderr, "zget: cannot configure SIGPIPE: %s\n", strerror(errno));
+        return 1;
+    }
+#endif
+
     /* The CLI owns one process-wide acquisition around all network work. */
     rc = zget_global_init();
     if (rc != ZGET_OK) {
         fprintf(stderr, "zget: %s\n", zget_error_string(rc));
         return 1;
     }
-
     zget_options_init(&options);
     /* CLI users may legitimately target archives with enormous directories. */
     options.max_metadata_bytes = UINT64_MAX;
     rc = zget_open_url_ex(url, &options, &ctx);
-    if (rc != ZGET_OK)
-        goto zget_failure;
-    rc = zget_find(ctx, member, &entry);
     if (rc != ZGET_OK)
         goto zget_failure;
 
@@ -114,11 +134,17 @@ int main(int argc, char **argv)
         fd = -1;
     }
 
-    rc = zget_extract(ctx, &entry, write_file, &output);
-    if (rc != ZGET_OK)
+    /* Keep ZIP-specific lookup details behind libzget's format-neutral API. */
+    rc = zget_extract_member(ctx, member, write_file, &output);
+    if (rc != ZGET_OK) {
+        if (output.broken_pipe)
+            goto done;
         goto zget_failure;
+    }
     /* Publish only after library validation and durable file contents succeed. */
     if (fflush(output.file) != 0 || (output_path != NULL && fsync(fileno(output.file)) != 0)) {
+        if (errno == EPIPE)
+            goto done;
         fprintf(stderr, "zget: cannot flush output: %s\n", strerror(errno));
         goto done;
     }
