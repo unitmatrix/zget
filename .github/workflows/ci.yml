@@ -15,7 +15,6 @@ jobs:
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
-      max-parallel: 1
       matrix:
         include:
           - architecture: x86_64
@@ -31,9 +30,8 @@ jobs:
       - name: Check out source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libcurl4-openssl-dev pkg-config zlib1g-dev
+        timeout-minutes: 7
+        run: bash -x scripts/install-ubuntu-dependencies.sh
       - name: Configure
         env:
           CC: ${{ matrix.compiler }}
@@ -79,11 +77,9 @@ jobs:
 
   macos:
     name: macOS / ${{ matrix.architecture }}
-    needs: linux
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
-      max-parallel: 1
       matrix:
         include:
           - architecture: arm64
@@ -104,13 +100,13 @@ jobs:
 
   sanitizers:
     name: ASan + UBSan
-    needs: macos
     runs-on: ubuntu-24.04
     steps:
       - name: Check out source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install dependencies
-        run: sudo apt-get update && sudo apt-get install -y clang libcurl4-openssl-dev zlib1g-dev
+        timeout-minutes: 7
+        run: bash -x scripts/install-ubuntu-dependencies.sh clang
       - name: Configure
         env:
           CC: clang
@@ -125,13 +121,13 @@ jobs:
 
   fuzz-smoke:
     name: Parser fuzz smoke
-    needs: sanitizers
     runs-on: ubuntu-24.04
     steps:
       - name: Check out source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install dependencies
-        run: sudo apt-get update && sudo apt-get install -y clang libcurl4-openssl-dev zlib1g-dev
+        timeout-minutes: 7
+        run: bash -x scripts/install-ubuntu-dependencies.sh clang
       - name: Configure and build fuzzers
         env:
           CC: clang

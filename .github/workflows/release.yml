@@ -51,7 +51,6 @@ jobs:
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
-      max-parallel: 1
       matrix:
         include:
           - platform: linux-x86_64
@@ -79,7 +78,8 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install Linux dependencies
         if: matrix.libc == 'glibc'
-        run: sudo apt-get update && sudo apt-get install -y libcurl4-openssl-dev zlib1g-dev
+        timeout-minutes: 7
+        run: bash -x scripts/install-ubuntu-dependencies.sh
       - name: Configure
         env:
           CC: ${{ matrix.compiler }}
