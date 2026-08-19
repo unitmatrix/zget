@@ -1,23 +1,7 @@
-#include "internal.h"
+#include "util.h"
 
-#include <ctype.h>
-#include <errno.h>
-#include <inttypes.h>
-#include <stdarg.h>
-#include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
-
-void zget_set_error(struct zget_ctx *ctx, int error, const char *fmt, ...)
-{
-    va_list ap;
-    if (ctx == NULL)
-        return;
-    ctx->error = error;
-    va_start(ap, fmt);
-    (void)vsnprintf(ctx->message, sizeof(ctx->message), fmt, ap);
-    va_end(ap);
-}
 
 bool zget_u64_add(uint64_t a, uint64_t b, uint64_t *result)
 {
@@ -34,7 +18,7 @@ bool zget_range_valid(uint64_t offset, uint64_t length, uint64_t total)
 
     /*
      * Validate the half-open interval [offset, offset + length) in one place.
-     * Callers may issue an HTTP request only after both addition and containment
+     * Callers may issue a source request only after addition and containment
      * succeed, preventing a wrapped ZIP offset from addressing unrelated bytes.
      */
     return zget_u64_add(offset, length, &end) && end <= total;
@@ -90,42 +74,4 @@ char *zget_strdup(const char *s)
     if (copy != NULL)
         memcpy(copy, s, n);
     return copy;
-}
-
-/* Parse one unsigned decimal field without accepting signs or overflow. */
-static bool parse_u64(const char **cursor, uint64_t *value)
-{
-    const char *start = *cursor;
-    char *end;
-    uintmax_t parsed;
-
-    if (!isdigit((unsigned char)*start))
-        return false;
-    errno = 0;
-    parsed = strtoumax(start, &end, 10);
-    if (errno == ERANGE || parsed > UINT64_MAX)
-        return false;
-    *cursor = end;
-    *value = (uint64_t)parsed;
-    return true;
-}
-
-/*
- * Content-Range has an exact grammar; scanf's signs and loose whitespace do
- * not. value must be a NUL-terminated string, matching what curl_easy_header
- * always provides for a real HTTP response.
- */
-bool zget_parse_content_range(const char *value, uint64_t *start,
-                              uint64_t *end, uint64_t *total)
-{
-    const char *p = value;
-
-    if (strncmp(p, "bytes ", 6) != 0)
-        return false;
-    p += 6;
-    if (!parse_u64(&p, start) || *p++ != '-' ||
-        !parse_u64(&p, end) || *p++ != '/' ||
-        !parse_u64(&p, total) || *p != '\0')
-        return false;
-    return true;
 }

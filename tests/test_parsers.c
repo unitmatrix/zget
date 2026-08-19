@@ -1,4 +1,5 @@
 #include "internal.h"
+#include "source/http-parse.h"
 #include "zip/zip_parse.h"
 
 #include <stdio.h>
@@ -93,11 +94,11 @@ static void test_streaming_cd(void)
     put16(cd + 28, 6);
     memcpy(cd + 46, "target", 6);
     /*
-     * Every fixed chunk size must find the target across arbitrary splits. The
-     * -1 result is the parser's successful "match found; stop transfer" sentinel.
+     * Every fixed chunk size must find the target across arbitrary splits. A
+     * source-level stop is successful early completion, not a consumer error.
      */
     for (chunk = 1; chunk <= sizeof(cd); ++chunk)
-        CHECK(zget_zip_fuzz_cd_stream(cd, sizeof(cd), chunk) == -1);
+        CHECK(zget_zip_fuzz_cd_stream(cd, sizeof(cd), chunk) == ZGET_SOURCE_STOP);
 }
 
 /* Run all parser checks and report aggregate failure through the process status. */

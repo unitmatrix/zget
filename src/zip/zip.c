@@ -13,8 +13,8 @@
 
 /*
  * Fixed-record parsers are deliberately pure: callers provide contiguous
- * fixed-size bytes, and no parser knows whether they came from HTTP or a fuzz
- * buffer. Variable fields are handled by the streaming layer below.
+ * fixed-size bytes, and no parser knows whether they came from a source or a
+ * fuzz buffer. Variable fields are handled by the streaming layer below.
  */
 int zget_zip_parse_cd_fixed(const unsigned char *p, size_t length,
                             struct zget_cd_fixed *out)
@@ -53,14 +53,15 @@ struct buffer {
     size_t length;
 };
 
-static int buffer_write(void *opaque, const void *data, size_t length)
+static enum zget_source_action buffer_write(void *opaque, const void *data,
+                                            size_t length)
 {
     struct buffer *b = opaque;
     if (length > b->capacity - b->length)
-        return 1;
+        return ZGET_SOURCE_ERROR;
     memcpy(b->data + b->length, data, length);
     b->length += length;
-    return 0;
+    return ZGET_SOURCE_CONTINUE;
 }
 
 int zget_zip_parse_eocd(const unsigned char *tail, size_t length,
@@ -221,10 +222,19 @@ int zget_parse_tail(struct zget_ctx *ctx, const unsigned char *tail,
     struct zget_eocd eocd;
     unsigned char record[56];
     struct buffer b = {record, sizeof(record), 0};
-    int rc = zget_zip_parse_eocd(tail, length, tail_offset, ctx->archive_size, &eocd);
+    uint64_t archive_size;
+    int rc;
+
+    if (!zget_source_get_size(ctx->source, &archive_size)) {
+        zget_error_set(&ctx->error, ZGET_EINVAL,
+                       "source size is unavailable");
+        return ZGET_EINVAL;
+    }
+    rc = zget_zip_parse_eocd(tail, length, tail_offset, archive_size, &eocd);
     if (rc != ZGET_OK) {
-        zget_set_error(ctx, rc, rc == ZGET_EUNSUPPORTED ?
-                       "multi-disk ZIP archives are unsupported" : "malformed ZIP EOCD");
+        zget_error_set(&ctx->error, rc, rc == ZGET_EUNSUPPORTED ?
+                       "multi-disk ZIP archives are unsupported" :
+                       "malformed ZIP EOCD");
         return rc;
     }
     if (eocd.zip64) {
@@ -233,14 +243,14 @@ int zget_parse_tail(struct zget_ctx *ctx, const unsigned char *tail,
             memcpy(record, tail + (size_t)(eocd.zip64_offset - tail_offset), 56);
             b.length = 56;
         } else {
-            rc = ctx->source.read_range(ctx->source.ctx, eocd.zip64_offset, 56,
+            rc = zget_source_read_range(ctx->source, eocd.zip64_offset, 56,
                                         buffer_write, &b);
             if (rc != ZGET_OK)
                 return rc;
         }
         rc = zget_zip_parse_zip64(record, b.length, &eocd);
         if (rc != ZGET_OK) {
-            zget_set_error(ctx, rc, rc == ZGET_EUNSUPPORTED ?
+            zget_error_set(&ctx->error, rc, rc == ZGET_EUNSUPPORTED ?
                            "multi-disk ZIP64 archives are unsupported" :
                            "malformed ZIP64 EOCD");
             return rc;
@@ -251,24 +261,27 @@ int zget_parse_tail(struct zget_ctx *ctx, const unsigned char *tail,
             if (!zget_u64_add(eocd.zip64_offset, 12, &record_end) ||
                 !zget_u64_add(record_end, eocd.zip64_record_size, &record_end) ||
                 record_end != eocd.eocd_offset - 20) {
-                zget_set_error(ctx, ZGET_EZIP, "malformed ZIP64 record length");
+                zget_error_set(&ctx->error, ZGET_EZIP,
+                               "malformed ZIP64 record length");
                 return ZGET_EZIP;
             }
         }
     }
     /*
-     * Both addition and containment precede the HTTP request. The directory
+     * Both addition and containment precede the source request. The directory
      * must also end before EOCD, preventing metadata from overlapping the tail
      * records or wrapping around uint64_t.
      */
-    if (!zget_range_valid(eocd.cd_offset, eocd.cd_size, ctx->archive_size) ||
+    if (!zget_range_valid(eocd.cd_offset, eocd.cd_size, archive_size) ||
         eocd.cd_offset + eocd.cd_size > eocd.eocd_offset) {
-        zget_set_error(ctx, ZGET_EZIP, "central directory lies outside the archive");
+        zget_error_set(&ctx->error, ZGET_EZIP,
+                       "central directory lies outside the archive");
         return ZGET_EZIP;
     }
     if ((ctx->options.max_metadata_bytes != 0 &&
          eocd.cd_size > ctx->options.max_metadata_bytes) || eocd.cd_size > SIZE_MAX) {
-        zget_set_error(ctx, ZGET_ELIMIT, "central directory exceeds metadata limit");
+        zget_error_set(&ctx->error, ZGET_ELIMIT,
+                       "central directory exceeds metadata limit");
         return ZGET_ELIMIT;
     }
     ctx->cd_offset = eocd.cd_offset;
@@ -278,7 +291,7 @@ int zget_parse_tail(struct zget_ctx *ctx, const unsigned char *tail,
 }
 
 /*
- * Central Directory data may split at any byte boundary in libcurl callbacks:
+ * Central Directory data may split at any byte boundary in source callbacks:
  *
  *   fixed header -> name -> extra -> comment -> next fixed header
  *
@@ -302,12 +315,13 @@ struct cd_parser {
     uint16_t name_len, extra_len, comment_len, flags, method, disk16;
     uint32_t crc, compressed32, size32, offset32;
     uint64_t entries;
+    uint64_t archive_size;
     bool matching;
 };
 
 static int cd_fail(struct cd_parser *p, int error, const char *message)
 {
-    zget_set_error(p->ctx, error, "%s", message);
+    zget_error_set(&p->ctx->error, error, "%s", message);
     return 1;
 }
 
@@ -331,7 +345,7 @@ static int cd_finish_match(struct cd_parser *p)
         return cd_fail(p, ZGET_EZIP, "malformed ZIP64 entry extra field");
     if (disk != 0)
         return cd_fail(p, ZGET_EUNSUPPORTED, "multi-disk ZIP entries are unsupported");
-    if (!zget_range_valid(offset, 30, p->ctx->archive_size))
+    if (!zget_range_valid(offset, 30, p->archive_size))
         return cd_fail(p, ZGET_EZIP, "local header offset is outside the archive");
     p->result->compressed_size = compressed;
     p->result->uncompressed_size = size;
@@ -427,7 +441,8 @@ static int cd_header_done(struct cd_parser *p)
 }
 
 /* Consume arbitrary callback fragments until an entry ends or a match is found. */
-static int cd_write(void *opaque, const void *data, size_t length)
+static enum zget_source_action cd_write(void *opaque, const void *data,
+                                        size_t length)
 {
     struct cd_parser *p = opaque;
     const unsigned char *in = data;
@@ -440,16 +455,16 @@ static int cd_write(void *opaque, const void *data, size_t length)
             memcpy(p->header + p->have, in, take);
             p->have += take; in += take; length -= take;
             if (p->have == 46 && cd_header_done(p) != 0)
-                return 1;
+                return ZGET_SOURCE_ERROR;
         } else if (p->state == CD_NAME) {
             need = p->name_len - p->name_pos; take = length < need ? length : need;
             memcpy(p->name + p->name_pos, in, take);
             p->name_pos += take; in += take; length -= take;
             if (p->name_pos == p->name_len) {
                 if (cd_name_done(p) != 0)
-                    return 1;
+                    return ZGET_SOURCE_ERROR;
                 if (p->extra_len == 0 && cd_extra_done(p) != 0)
-                    return 1;
+                    return ZGET_SOURCE_ERROR;
             }
         } else if (p->state == CD_EXTRA) {
             need = p->extra_len - p->extra_pos; take = length < need ? length : need;
@@ -458,7 +473,7 @@ static int cd_write(void *opaque, const void *data, size_t length)
             p->extra_pos += take; in += take; length -= take;
             if (p->extra_pos == p->extra_len) {
                 if (cd_extra_done(p) != 0)
-                    return 1;
+                    return ZGET_SOURCE_ERROR;
             }
         } else if (p->state == CD_COMMENT) {
             need = p->comment_len - p->comment_pos; take = length < need ? length : need;
@@ -468,8 +483,8 @@ static int cd_write(void *opaque, const void *data, size_t length)
             }
         }
     }
-    /* -1 asks the HTTP layer to cancel the remaining CD bytes successfully. */
-    return p->state == CD_COMPLETE ? -1 : 0;
+    /* The source cancels cleanly without learning why the format is finished. */
+    return p->state == CD_COMPLETE ? ZGET_SOURCE_STOP : ZGET_SOURCE_CONTINUE;
 }
 
 int zget_zip_fuzz_cd_stream(const unsigned char *data, size_t length,
@@ -479,8 +494,7 @@ int zget_zip_fuzz_cd_stream(const unsigned char *data, size_t length,
     struct cd_parser p = {0};
     zget_entry entry;
     size_t offset = 0;
-    int rc = 0;
-    ctx.archive_size = UINT64_MAX;
+    enum zget_source_action action = ZGET_SOURCE_CONTINUE;
     ctx.cd_size = length;
     ctx.entry_count = UINT64_MAX;
     p.ctx = &ctx;
@@ -488,18 +502,19 @@ int zget_zip_fuzz_cd_stream(const unsigned char *data, size_t length,
     p.target_len = 6;
     p.result = &entry;
     p.state = CD_HEADER;
+    p.archive_size = UINT64_MAX;
     if (chunk_size == 0)
         chunk_size = 1;
     while (offset < length) {
         size_t part = length - offset < chunk_size ? length - offset : chunk_size;
-        rc = cd_write(&p, data + offset, part);
-        if (rc != 0)
+        action = cd_write(&p, data + offset, part);
+        if (action != ZGET_SOURCE_CONTINUE)
             break;
         offset += part;
     }
     free(p.name);
     free(p.extra);
-    return rc;
+    return (int)action;
 }
 
 int zget_find_in_cd(struct zget_ctx *ctx, const char *member, zget_entry *entry)
@@ -511,16 +526,21 @@ int zget_find_in_cd(struct zget_ctx *ctx, const char *member, zget_entry *entry)
     p.target_len = strlen(member);
     p.result = entry;
     p.state = CD_HEADER;
+    if (!zget_source_get_size(ctx->source, &p.archive_size)) {
+        zget_error_set(&ctx->error, ZGET_EINVAL,
+                       "source size is unavailable");
+        return ZGET_EINVAL;
+    }
     if (ctx->entry_count == 0) {
-        zget_set_error(ctx, ZGET_ENOTFOUND, "member not found");
+        zget_error_set(&ctx->error, ZGET_ENOTFOUND, "member not found");
         return ZGET_ENOTFOUND;
     }
     /*
-     * The first exact match wins by policy. cd_write returns the internal stop
-     * sentinel after retaining its metadata, allowing libcurl to terminate the
-     * directory transfer without scanning later entries or detecting duplicates.
+     * The first exact match wins by policy. The callback stops the source after
+     * retaining its metadata, avoiding later entries without coupling ZIP to a
+     * particular transport or exposing duplicate detection state.
      */
-    rc = ctx->source.read_range(ctx->source.ctx, ctx->cd_offset, ctx->cd_size,
+    rc = zget_source_read_range(ctx->source, ctx->cd_offset, ctx->cd_size,
                                 cd_write, &p);
     /* Parser scratch storage is owned here on success, failure, and early stop. */
     free(p.name);
@@ -530,10 +550,11 @@ int zget_find_in_cd(struct zget_ctx *ctx, const char *member, zget_entry *entry)
     if (rc != ZGET_OK)
         return rc;
     if (p.state != CD_HEADER || p.have != 0 || p.entries != ctx->entry_count) {
-        zget_set_error(ctx, ZGET_EZIP, "central directory is truncated or inconsistent");
+        zget_error_set(&ctx->error, ZGET_EZIP,
+                       "central directory is truncated or inconsistent");
         return ZGET_EZIP;
     }
-    zget_set_error(ctx, ZGET_ENOTFOUND, "member not found");
+    zget_error_set(&ctx->error, ZGET_ENOTFOUND, "member not found");
     return ZGET_ENOTFOUND;
 }
 
@@ -543,20 +564,37 @@ int zget_read_local_header(struct zget_ctx *ctx, const zget_entry *entry,
     unsigned char header[30];
     struct buffer b = {header, sizeof(header), 0};
     struct zget_local_fixed h;
-    uint64_t offset;
-    int rc = ctx->source.read_range(ctx->source.ctx, entry->local_header_offset,
-                                    sizeof(header), buffer_write, &b);
+    uint64_t archive_size, offset;
+    int rc;
+
+    if (!zget_source_get_size(ctx->source, &archive_size)) {
+        zget_error_set(&ctx->error, ZGET_EINVAL,
+                       "source size is unavailable");
+        return ZGET_EINVAL;
+    }
+    /* zget_entry is public, so do not rely solely on the earlier CD check. */
+    if (!zget_range_valid(entry->local_header_offset, sizeof(header),
+                          archive_size)) {
+        zget_error_set(&ctx->error, ZGET_EZIP,
+                       "local header offset is outside the archive");
+        return ZGET_EZIP;
+    }
+    rc = zget_source_read_range(ctx->source, entry->local_header_offset,
+                                sizeof(header), buffer_write, &b);
     if (rc != ZGET_OK)
         return rc;
     if (zget_zip_parse_local_fixed(header, b.length, &h) != ZGET_OK) {
-        zget_set_error(ctx, ZGET_EZIP, "malformed local file header");
+        zget_error_set(&ctx->error, ZGET_EZIP,
+                       "malformed local file header");
         return ZGET_EZIP;
     }
     if ((h.flags & 0x0041u) != 0 || h.method != entry->compression_method) {
-        zget_set_error(ctx, (h.flags & 0x0041u) ? ZGET_EUNSUPPORTED : ZGET_EZIP,
-                       (h.flags & 0x0041u) ? "encrypted ZIP entries are unsupported" :
+        zget_error_set(&ctx->error,
+                       (h.flags & 0x0041u) ? ZGET_EUNSUPPORTED : ZGET_EZIP,
+                       (h.flags & 0x0041u) ?
+                       "encrypted ZIP entries are unsupported" :
                        "local and central compression methods differ");
-        return ctx->error;
+        return ctx->error.code;
     }
     /*
      * The Local Header contributes only its fixed size and two variable lengths:
@@ -564,14 +602,15 @@ int zget_read_local_header(struct zget_ctx *ctx, const zget_entry *entry,
      *   payload = local_offset + 30 + name_length + extra_length
      *
      * Perform every addition with overflow checks, then validate the complete
-     * compressed payload interval before issuing its HTTP request. Sizes and CRC
+     * compressed payload interval before issuing its range request. Sizes and CRC
      * remain those from the Central Directory, so data descriptors need no scan.
      */
     if (!zget_u64_add(entry->local_header_offset, 30u, &offset) ||
         !zget_u64_add(offset, h.name_length, &offset) ||
         !zget_u64_add(offset, h.extra_length, &offset) ||
-        !zget_range_valid(offset, entry->compressed_size, ctx->archive_size)) {
-        zget_set_error(ctx, ZGET_EZIP, "member payload lies outside the archive");
+        !zget_range_valid(offset, entry->compressed_size, archive_size)) {
+        zget_error_set(&ctx->error, ZGET_EZIP,
+                       "member payload lies outside the archive");
         return ZGET_EZIP;
     }
     *data_offset = offset;

@@ -1,4 +1,5 @@
 #include "internal.h"
+#include "source/http.h"
 
 #include <limits.h>
 #include <stdlib.h>
@@ -17,10 +18,13 @@ static unsigned int global_references;
 
 int zget_global_init(void)
 {
+    int rc;
+
     if (global_references == UINT_MAX)
         return ZGET_ELIMIT;
-    if (curl_global_init(CURL_GLOBAL_DEFAULT) != CURLE_OK)
-        return ZGET_EHTTP;
+    rc = zget_http_global_init();
+    if (rc != ZGET_OK)
+        return rc;
     ++global_references;
     return ZGET_OK;
 }
@@ -30,7 +34,7 @@ void zget_global_cleanup(void)
     if (global_references == 0)
         return;
     --global_references;
-    curl_global_cleanup();
+    zget_http_global_cleanup();
 }
 
 struct tail_buffer {
@@ -39,14 +43,15 @@ struct tail_buffer {
     size_t length;
 };
 
-static int tail_write(void *opaque, const void *data, size_t length)
+static enum zget_source_action tail_write(void *opaque, const void *data,
+                                          size_t length)
 {
     struct tail_buffer *tail = opaque;
     if (length > tail->capacity - tail->length)
-        return 1;
+        return ZGET_SOURCE_ERROR;
     memcpy(tail->data + tail->length, data, length);
     tail->length += length;
-    return 0;
+    return ZGET_SOURCE_CONTINUE;
 }
 
 void zget_options_init(zget_options *options)
@@ -68,7 +73,8 @@ static int copy_options(struct zget_ctx *ctx, const zget_options *options)
     if (options == NULL)
         return ZGET_OK;
     if (options->struct_size < ZGET_OPTIONS_V1_SIZE) {
-        zget_set_error(ctx, ZGET_EINVAL, "zget_options struct is too small");
+        zget_error_set(&ctx->error, ZGET_EINVAL,
+                       "zget_options struct is too small");
         return ZGET_EINVAL;
     }
     copy_size = options->struct_size;
@@ -83,7 +89,8 @@ static int copy_options(struct zget_ctx *ctx, const zget_options *options)
     if (ctx->options.max_redirects == 0)
         ctx->options.max_redirects = 8;
     if (ctx->options.max_redirects > 50) {
-        zget_set_error(ctx, ZGET_EINVAL, "max_redirects must not exceed 50");
+        zget_error_set(&ctx->error, ZGET_EINVAL,
+                       "max_redirects must not exceed 50");
         return ZGET_EINVAL;
     }
     return ZGET_OK;
@@ -95,7 +102,8 @@ int zget_open_url_ex(const char *archive_url, const zget_options *options,
 {
     struct zget_ctx *ctx;
     struct tail_buffer tail = {0};
-    uint64_t request_size, tail_offset;
+    struct zget_http_options http_options;
+    uint64_t request_size, source_size, tail_offset;
     int rc;
     if (out_ctx == NULL)
         return ZGET_EINVAL;
@@ -112,18 +120,13 @@ int zget_open_url_ex(const char *archive_url, const zget_options *options,
     ctx = calloc(1, sizeof(*ctx));
     if (ctx == NULL)
         return ZGET_ENOMEM;
-    ctx->url = zget_strdup(archive_url);
-    if (ctx->url == NULL) {
-        rc = ZGET_ENOMEM;
-        goto fail;
-    }
     if ((rc = copy_options(ctx, options)) != ZGET_OK)
         goto fail;
-    if ((rc = zget_http_init(ctx)) != ZGET_OK)
+    http_options.max_requests = ctx->options.max_http_requests;
+    http_options.max_redirects = ctx->options.max_redirects;
+    if ((rc = zget_http_source_open(archive_url, &http_options, &ctx->error,
+                                    &ctx->source)) != ZGET_OK)
         goto fail;
-    /* ZIP consumes ranges through the source abstraction, never through curl. */
-    ctx->source.ctx = ctx;
-    ctx->source.read_range = zget_http_read;
 
     /*
      * EOCD is at least 22 bytes and can follow a 65535-byte archive comment.
@@ -134,7 +137,8 @@ int zget_open_url_ex(const char *archive_url, const zget_options *options,
     if (ctx->options.max_metadata_bytes < request_size)
         request_size = ctx->options.max_metadata_bytes;
     if (request_size < 22) {
-        zget_set_error(ctx, ZGET_ELIMIT, "metadata limit is too small for ZIP EOCD");
+        zget_error_set(&ctx->error, ZGET_ELIMIT,
+                       "metadata limit is too small for ZIP EOCD");
         rc = ZGET_ELIMIT;
         goto fail;
     }
@@ -144,9 +148,17 @@ int zget_open_url_ex(const char *archive_url, const zget_options *options,
         rc = ZGET_ENOMEM;
         goto fail;
     }
-    if ((rc = zget_http_read_suffix(ctx, request_size, tail_write, &tail)) != ZGET_OK)
+    if ((rc = zget_source_read_suffix(ctx->source, request_size,
+                                      tail_write, &tail)) != ZGET_OK)
         goto fail;
-    tail_offset = ctx->archive_size - tail.length;
+    if (!zget_source_get_size(ctx->source, &source_size) ||
+        tail.length > source_size) {
+        zget_error_set(&ctx->error, ZGET_EHTTP,
+                       "source size unavailable after suffix request");
+        rc = ZGET_EHTTP;
+        goto fail;
+    }
+    tail_offset = source_size - tail.length;
     if ((rc = zget_parse_tail(ctx, tail.data, tail.length, tail_offset)) != ZGET_OK)
         goto fail;
     ctx->ready = true;
@@ -155,8 +167,8 @@ int zget_open_url_ex(const char *archive_url, const zget_options *options,
     return ZGET_OK;
 fail:
     free(tail.data);
-    if (ctx->error == ZGET_OK)
-        zget_set_error(ctx, rc, "%s", zget_error_string(rc));
+    if (ctx->error.code == ZGET_OK)
+        zget_error_set(&ctx->error, rc, "%s", zget_error_string(rc));
     /*
      * Unlike zget_open_url(), the explicit API transfers this failed context to
      * the caller so the detailed diagnostic survives. zget_close() accepts it.
@@ -187,14 +199,14 @@ int zget_find(zget_ctx *ctx, const char *member_path, zget_entry *entry)
     if (ctx == NULL || member_path == NULL || entry == NULL)
         return ZGET_EINVAL;
     if (!ctx->ready)
-        return ctx->error != ZGET_OK ? ctx->error : ZGET_EINVAL;
-    ctx->error = ZGET_OK;
-    ctx->message[0] = '\0';
+        return ctx->error.code != ZGET_OK ? ctx->error.code : ZGET_EINVAL;
+    ctx->error.code = ZGET_OK;
+    ctx->error.message[0] = '\0';
     length = strlen(member_path);
     /* Member names are archive identifiers: compare exact bytes, without path normalization. */
     if (length == 0 || length > UINT16_MAX ||
         !zget_valid_utf8((const unsigned char *)member_path, length)) {
-        zget_set_error(ctx, ZGET_EINVAL,
+        zget_error_set(&ctx->error, ZGET_EINVAL,
                        "member path must be non-empty, valid UTF-8, and at most 65535 bytes");
         return ZGET_EINVAL;
     }
@@ -209,16 +221,18 @@ int zget_extract(zget_ctx *ctx, const zget_entry *entry,
     if (ctx == NULL || entry == NULL || write_cb == NULL)
         return ZGET_EINVAL;
     if (!ctx->ready)
-        return ctx->error != ZGET_OK ? ctx->error : ZGET_EINVAL;
-    ctx->error = ZGET_OK;
-    ctx->message[0] = '\0';
+        return ctx->error.code != ZGET_OK ? ctx->error.code : ZGET_EINVAL;
+    ctx->error.code = ZGET_OK;
+    ctx->error.message[0] = '\0';
     /* zget_entry is public, so reapply the hard codec/encryption whitelist here. */
     if ((entry->flags & 0x0041u) != 0) {
-        zget_set_error(ctx, ZGET_EUNSUPPORTED, "encrypted ZIP entries are unsupported");
+        zget_error_set(&ctx->error, ZGET_EUNSUPPORTED,
+                       "encrypted ZIP entries are unsupported");
         return ZGET_EUNSUPPORTED;
     }
     if (entry->compression_method != 0 && entry->compression_method != 8) {
-        zget_set_error(ctx, ZGET_ECOMPRESSION, "unsupported ZIP compression method");
+        zget_error_set(&ctx->error, ZGET_ECOMPRESSION,
+                       "unsupported ZIP compression method");
         return ZGET_ECOMPRESSION;
     }
     rc = zget_read_local_header(ctx, entry, &data_offset);
@@ -254,22 +268,18 @@ void zget_close(zget_ctx *ctx)
      */
     if (ctx == NULL)
         return;
-    if (ctx->curl != NULL)
-        curl_easy_cleanup(ctx->curl);
-    free(ctx->url);
-    free(ctx->effective_url);
-    free(ctx->strong_etag);
+    zget_source_close(ctx->source);
     free(ctx);
 }
 
 int zget_last_error(const zget_ctx *ctx)
 {
-    return ctx == NULL ? ZGET_EINVAL : ctx->error;
+    return ctx == NULL ? ZGET_EINVAL : ctx->error.code;
 }
 
 const char *zget_last_error_message(const zget_ctx *ctx)
 {
-    return ctx == NULL ? "invalid zget context" : ctx->message;
+    return ctx == NULL ? "invalid zget context" : ctx->error.message;
 }
 
 const char *zget_error_string(int error)

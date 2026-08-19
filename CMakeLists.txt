@@ -28,7 +28,9 @@ find_package(CURL 7.85.0 REQUIRED)
 find_package(ZLIB REQUIRED)
 
 set(ZGET_LIBRARY_SOURCES
-    src/zget.c src/util.c src/http/http.c src/zip/zip.c src/codec/extract.c)
+    src/zget.c src/error.c src/util.c src/source/source.c
+    src/source/http-parse.c src/source/http.c
+    src/zip/zip.c src/codec/extract.c)
 
 add_library(libzget SHARED ${ZGET_LIBRARY_SOURCES})
 add_library(libzget_static STATIC ${ZGET_LIBRARY_SOURCES})
@@ -67,7 +69,9 @@ if(UNIX)
 endif()
 
 if(BUILD_TESTING OR ZGET_BUILD_FUZZERS)
-    add_library(zget_parser_objects OBJECT src/util.c src/zip/zip.c)
+    add_library(zget_parser_objects OBJECT
+        src/error.c src/util.c src/source/source.c src/source/http-parse.c
+        src/zip/zip.c)
     target_compile_features(zget_parser_objects PRIVATE c_std_99)
     target_include_directories(zget_parser_objects PRIVATE include src
         "${ZGET_GENERATED_INCLUDE_DIR}")
@@ -103,6 +107,12 @@ if(BUILD_TESTING)
     add_executable(zget_api_tests tests/test_api.c)
     target_link_libraries(zget_api_tests PRIVATE Zget::libzget_static)
     add_test(NAME api_contracts COMMAND zget_api_tests)
+
+    # Exercise the transport-independent source contract with no HTTP backend.
+    add_executable(zget_source_tests tests/test_source.c)
+    target_include_directories(zget_source_tests PRIVATE src)
+    target_link_libraries(zget_source_tests PRIVATE Zget::libzget_static)
+    add_test(NAME source_contracts COMMAND zget_source_tests)
 
     find_package(Python3 COMPONENTS Interpreter)
     if(Python3_Interpreter_FOUND AND ZGET_BUILD_REFERENCE_TESTS)
