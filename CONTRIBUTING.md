@@ -4,6 +4,27 @@ Keep changes focused on fetching one exact ZIP member. Core ZIP parsing must
 remain independent of HTTP, streaming, hostile-input safe, and O(1) in entry
 count. New codecs or archive formats require an explicit product decision.
 
+## Internal architecture
+
+The library joins two independent internal abstractions in `src/zget.c`:
+
+- `src/source/` owns range-addressable byte access, source identity, and
+  transport policy. Backends must not interpret container metadata.
+- `src/format/` owns container discovery, member lookup, and extraction.
+  Engines borrow their source and shared error state from `zget_ctx`; they must
+  not close either one.
+
+ZIP-specific state and code live under `src/format/zip/`, including EOCD and
+ZIP64 handling, streaming Central Directory parsing, Local Headers, STORE,
+DEFLATE, and CRC validation. Adding another format may extend selection inside
+the format layer, but must not require changes to an HTTP backend. Likewise,
+adding another source must not require changes to ZIP parsing.
+
+The format layer requests semantic exact or suffix ranges rather than treating
+a source as a seekable file. Preserve streaming callbacks, early-stop behavior,
+and memory use independent of archive entry count; do not add a generic cache
+or archive-wide index without a measured reason.
+
 Before submitting a change, build with both GCC and Clang where available and
 run:
 

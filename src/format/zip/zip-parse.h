@@ -1,5 +1,5 @@
-#ifndef ZGET_ZIP_PARSE_H
-#define ZGET_ZIP_PARSE_H
+#ifndef ZGET_FORMAT_ZIP_PARSE_H
+#define ZGET_FORMAT_ZIP_PARSE_H
 
 #include <stddef.h>
 #include <stdint.h>

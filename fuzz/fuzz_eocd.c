@@ -1,5 +1,5 @@
-#include "internal.h"
-#include "zip/zip_parse.h"
+#include "format/zip/zip-parse.h"
+#include "zget.h"
 #include <stddef.h>
 #include <stdint.h>
 /* Exercise both terminal ZIP32 and fixed ZIP64 tail-record parsers. */
