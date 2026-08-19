@@ -105,14 +105,17 @@ ZGET_API zget_ctx *zget_open_url(const char *archive_url,
 /*
  * Diagnostic form of zget_open_url(). On most failures, *out_ctx retains the
  * detailed error and still belongs to the caller; always pass it to
- * zget_close(). Invalid arguments, missing global initialization, and
- * allocation failure may leave it NULL.
+ * zget_close(). When no diagnostic context is available, *out_ctx is set to
+ * NULL rather than retaining its previous value.
  */
 ZGET_API int zget_open_url_ex(const char *archive_url,
                               const zget_options *options,
                               zget_ctx **out_ctx);
 
-/* entry receives only the metadata needed to fetch and validate one member. */
+/*
+ * entry receives only the metadata needed to fetch and validate one member.
+ * It is cleared before validation and remains zeroed when the lookup fails.
+ */
 ZGET_API int zget_find(zget_ctx *ctx, const char *member_path,
                        zget_entry *entry);
 
