@@ -53,7 +53,14 @@ jobs:
           test -f stage/usr/share/licenses/zget/LICENSE
 
           project_version="$(cat VERSION)"
-          abi_version="${project_version%%.*}"
+          project_major="${project_version%%.*}"
+          version_tail="${project_version#*.}"
+          project_minor="${version_tail%%.*}"
+          if [[ "${project_major}" = 0 ]]; then
+            abi_version="${project_major}.${project_minor}"
+          else
+            abi_version="${project_major}"
+          fi
           library="$(find stage/usr -type f -name "libzget.so.${project_version}" -print -quit)"
           pc_file="$(find stage/usr -type f -path '*/pkgconfig/libzget.pc' -print -quit)"
           test -n "${library}"

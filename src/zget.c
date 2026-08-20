@@ -147,12 +147,22 @@ zget_ctx *zget_open_url(const char *archive_url, const zget_options *options)
 int zget_extract_member(zget_ctx *ctx, const char *member_path,
                         zget_write_cb write_cb, void *userdata)
 {
-    if (ctx == NULL || member_path == NULL || write_cb == NULL)
+    if (ctx == NULL)
         return ZGET_EINVAL;
     if (!ctx->ready)
         return ctx->error.code != ZGET_OK ? ctx->error.code : ZGET_EINVAL;
+    /*
+     * Every attempted operation on a ready context replaces its diagnostic.
+     * In particular, report invalid call arguments instead of leaving an older
+     * network or archive error visible through zget_last_error().
+     */
     ctx->error.code = ZGET_OK;
     ctx->error.message[0] = '\0';
+    if (member_path == NULL || write_cb == NULL) {
+        zget_error_set(&ctx->error, ZGET_EINVAL,
+                       "member path and write callback are required");
+        return ZGET_EINVAL;
+    }
     return zget_format_extract_member(ctx->format, member_path,
                                       write_cb, userdata);
 }
@@ -160,42 +170,19 @@ int zget_extract_member(zget_ctx *ctx, const char *member_path,
 int zget_list(zget_ctx *ctx, const char *member_path,
               zget_list_cb list_cb, void *userdata)
 {
-    if (ctx == NULL || list_cb == NULL)
+    if (ctx == NULL)
         return ZGET_EINVAL;
     if (!ctx->ready)
         return ctx->error.code != ZGET_OK ? ctx->error.code : ZGET_EINVAL;
+    /* See zget_extract_member(): ready-context diagnostics are per operation. */
     ctx->error.code = ZGET_OK;
     ctx->error.message[0] = '\0';
+    if (list_cb == NULL) {
+        zget_error_set(&ctx->error, ZGET_EINVAL,
+                       "listing callback is required");
+        return ZGET_EINVAL;
+    }
     return zget_format_list(ctx->format, member_path, list_cb, userdata);
-}
-
-int zget_find(zget_ctx *ctx, const char *member_path, zget_entry *entry)
-{
-    /*
-     * Failed lookups must not leave metadata from an earlier successful call
-     * looking usable. Clear the output before validating the context or name.
-     */
-    if (entry != NULL)
-        memset(entry, 0, sizeof(*entry));
-    if (ctx == NULL || member_path == NULL || entry == NULL)
-        return ZGET_EINVAL;
-    if (!ctx->ready)
-        return ctx->error.code != ZGET_OK ? ctx->error.code : ZGET_EINVAL;
-    ctx->error.code = ZGET_OK;
-    ctx->error.message[0] = '\0';
-    return zget_format_find(ctx->format, member_path, entry);
-}
-
-int zget_extract(zget_ctx *ctx, const zget_entry *entry,
-                 zget_write_cb write_cb, void *userdata)
-{
-    if (ctx == NULL || entry == NULL || write_cb == NULL)
-        return ZGET_EINVAL;
-    if (!ctx->ready)
-        return ctx->error.code != ZGET_OK ? ctx->error.code : ZGET_EINVAL;
-    ctx->error.code = ZGET_OK;
-    ctx->error.message[0] = '\0';
-    return zget_format_extract(ctx->format, entry, write_cb, userdata);
 }
 
 int zget_get(const char *archive_url, const char *member_path,

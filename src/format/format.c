@@ -1,17 +1,5 @@
-#include "format/format-private.h"
+#include "format/format.h"
 #include "format/zip/zip.h"
-
-void zget_format_init(struct zget_format *format,
-                      const struct zget_format_ops *ops,
-                      struct zget_source *source,
-                      const struct zget_format_options *options,
-                      struct zget_error_state *error)
-{
-    format->ops = ops;
-    format->source = source;
-    format->error = error;
-    format->options = *options;
-}
 
 int zget_format_open(struct zget_source *source,
                      const struct zget_format_options *options,
@@ -25,9 +13,9 @@ int zget_format_open(struct zget_source *source,
         return ZGET_EINVAL;
 
     /*
-     * ZIP is currently the sole engine, so selection is deliberately direct.
-     * A future probe dispatcher belongs here; sources and public orchestration
-     * will not need to change when another range-friendly format is admitted.
+     * ZIP is the sole supported container, so selection is direct. Keeping this
+     * narrow façade gives public orchestration a format-neutral vocabulary
+     * without introducing a registry, vtable, or caller-visible extension API.
      */
     return zget_zip_format_open(source, options, error, out_format);
 }
@@ -35,42 +23,22 @@ int zget_format_open(struct zget_source *source,
 int zget_format_extract_member(struct zget_format *format, const char *member,
                                zget_write_cb write_cb, void *userdata)
 {
-    if (format == NULL || format->ops == NULL ||
-        format->ops->extract_member == NULL || member == NULL ||
-        write_cb == NULL)
+    if (format == NULL || member == NULL || write_cb == NULL)
         return ZGET_EINVAL;
-    return format->ops->extract_member(format, member, write_cb, userdata);
+    return zget_zip_format_extract_member(format, member, write_cb, userdata);
 }
 
 int zget_format_list(struct zget_format *format, const char *member,
                      zget_list_cb list_cb, void *userdata)
 {
-    if (format == NULL || format->ops == NULL ||
-        format->ops->list == NULL || list_cb == NULL)
+    if (format == NULL || list_cb == NULL)
         return ZGET_EINVAL;
-    return format->ops->list(format, member, list_cb, userdata);
-}
-
-int zget_format_find(struct zget_format *format, const char *member,
-                     zget_entry *entry)
-{
-    if (format == NULL || format->ops == NULL || format->ops->find == NULL ||
-        member == NULL || entry == NULL)
-        return ZGET_EINVAL;
-    return format->ops->find(format, member, entry);
-}
-
-int zget_format_extract(struct zget_format *format, const zget_entry *entry,
-                        zget_write_cb write_cb, void *userdata)
-{
-    if (format == NULL || format->ops == NULL ||
-        format->ops->extract == NULL || entry == NULL || write_cb == NULL)
-        return ZGET_EINVAL;
-    return format->ops->extract(format, entry, write_cb, userdata);
+    return zget_zip_format_list(format, member, list_cb, userdata);
 }
 
 void zget_format_close(struct zget_format *format)
 {
-    if (format != NULL && format->ops != NULL && format->ops->close != NULL)
-        format->ops->close(format);
+    /* zget_format_open() is the sole constructor and always creates a ZIP object. */
+    if (format != NULL)
+        zget_zip_format_close(format);
 }
