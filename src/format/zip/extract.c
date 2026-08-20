@@ -11,7 +11,7 @@
  */
 struct extractor {
     struct zget_zip_format *zip;
-    const zget_entry *entry;
+    const struct zget_zip_entry *entry;
     zget_write_cb output;
     void *userdata;
     z_stream stream;
@@ -112,7 +112,8 @@ static enum zget_source_action deflate_write(void *opaque, const void *data,
 
 /* Stream one exact compressed range through STORE or raw DEFLATE and CRC32. */
 int zget_zip_extract_payload(struct zget_zip_format *zip,
-                             const zget_entry *entry, uint64_t data_offset,
+                             const struct zget_zip_entry *entry,
+                             uint64_t data_offset,
                              zget_write_cb cb, void *userdata)
 {
     struct extractor x;

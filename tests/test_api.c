@@ -1,18 +1,7 @@
-#include "zget.h"
+#include "internal.h"
 
 #include <stdio.h>
 #include <string.h>
-
-static int bytes_are_zero(const void *data, size_t size)
-{
-    const unsigned char *bytes = data;
-    size_t i;
-
-    for (i = 0; i < size; ++i)
-        if (bytes[i] != 0)
-            return 0;
-    return 1;
-}
 
 static int discard(void *userdata, const void *data, size_t size)
 {
@@ -29,17 +18,15 @@ static int discard_member(void *userdata, const zget_member_info *member)
     return 0;
 }
 
-static int expect_entry_v1_layout(void)
+static int expect_error_values(void)
 {
-    /* Existing binaries pass this structure by address, so offsets are ABI. */
-    if (sizeof(zget_entry) != 32 ||
-        offsetof(zget_entry, compressed_size) != 0 ||
-        offsetof(zget_entry, uncompressed_size) != 8 ||
-        offsetof(zget_entry, local_header_offset) != 16 ||
-        offsetof(zget_entry, crc32) != 24 ||
-        offsetof(zget_entry, compression_method) != 28 ||
-        offsetof(zget_entry, flags) != 30) {
-        fprintf(stderr, "zget_entry v0.1 ABI layout changed\n");
+    if (ZGET_OK != 0 || ZGET_EINVAL != 1 || ZGET_EHTTP != 2 ||
+        ZGET_ERANGE != 3 || ZGET_ECHANGED != 4 || ZGET_EZIP != 5 ||
+        ZGET_EUNSUPPORTED != 6 || ZGET_ENOTFOUND != 7 ||
+        ZGET_ECOMPRESSION != 8 || ZGET_ECRC != 9 || ZGET_EDEFLATE != 10 ||
+        ZGET_EIO != 11 || ZGET_ELIMIT != 12 || ZGET_ENOMEM != 13 ||
+        ZGET_ENOTINITIALIZED != 14) {
+        fprintf(stderr, "public error values changed\n");
         return 1;
     }
     return 0;
@@ -59,16 +46,25 @@ static int expect_open_clears_context(const char *url)
     return 0;
 }
 
-static int expect_find_clears_entry(void)
+static int expect_invalid_call_updates_error(void)
 {
-    zget_entry entry;
-    int rc;
+    struct zget_ctx ctx = {0};
 
-    /* Fill every byte, including padding, so a partial clear cannot pass. */
-    memset(&entry, 0xa5, sizeof(entry));
-    rc = zget_find(NULL, "member", &entry);
-    if (rc != ZGET_EINVAL || !bytes_are_zero(&entry, sizeof(entry))) {
-        fprintf(stderr, "invalid lookup returned %d with stale entry data\n", rc);
+    ctx.ready = true;
+    ctx.error.code = ZGET_EHTTP;
+    strcpy(ctx.error.message, "stale error");
+    if (zget_extract_member(&ctx, NULL, discard, NULL) != ZGET_EINVAL ||
+        zget_last_error(&ctx) != ZGET_EINVAL ||
+        strcmp(zget_last_error_message(&ctx),
+               "member path and write callback are required") != 0) {
+        fprintf(stderr, "invalid extraction left stale context error state\n");
+        return 1;
+    }
+    if (zget_list(&ctx, NULL, NULL, NULL) != ZGET_EINVAL ||
+        zget_last_error(&ctx) != ZGET_EINVAL ||
+        strcmp(zget_last_error_message(&ctx),
+               "listing callback is required") != 0) {
+        fprintf(stderr, "invalid listing left stale context error state\n");
         return 1;
     }
     return 0;
@@ -81,15 +77,14 @@ int main(void)
     /* These fail before global initialization and must still sanitize output. */
     failed |= expect_open_clears_context(NULL);
     failed |= expect_open_clears_context("");
-    failed |= expect_find_clears_entry();
-    failed |= expect_entry_v1_layout();
+    failed |= expect_error_values();
+    failed |= expect_invalid_call_updates_error();
     if (zget_extract_member(NULL, "member", discard, NULL) != ZGET_EINVAL) {
         fprintf(stderr, "extract-member accepted a NULL context\n");
         failed = 1;
     }
-    if (zget_list(NULL, NULL, discard_member, NULL) != ZGET_EINVAL ||
-        zget_list((zget_ctx *)1, NULL, NULL, NULL) != ZGET_EINVAL) {
-        fprintf(stderr, "list accepted a NULL context or callback\n");
+    if (zget_list(NULL, NULL, discard_member, NULL) != ZGET_EINVAL) {
+        fprintf(stderr, "list accepted a NULL context\n");
         failed = 1;
     }
     return failed ? 1 : 0;

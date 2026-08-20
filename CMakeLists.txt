@@ -31,7 +31,7 @@ set(ZGET_LIBRARY_SOURCES
     src/zget.c src/error.c src/util.c src/source/source.c
     src/source/http-parse.c src/source/http.c
     src/format/format.c src/format/zip/zip.c
-    src/format/zip/extract.c)
+    src/format/zip/zip-parse.c src/format/zip/extract.c)
 
 add_library(libzget SHARED ${ZGET_LIBRARY_SOURCES})
 add_library(libzget_static STATIC ${ZGET_LIBRARY_SOURCES})
@@ -55,9 +55,18 @@ foreach(target IN ITEMS libzget libzget_static)
     endif()
 endforeach()
 
+if(PROJECT_VERSION_MAJOR EQUAL 0)
+    # Before 1.0, minor releases may deliberately revise the public ABI while
+    # patch releases remain compatible within their minor release line.
+    set(ZGET_SOVERSION "${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}")
+    set(ZGET_PACKAGE_COMPATIBILITY SameMinorVersion)
+else()
+    set(ZGET_SOVERSION "${PROJECT_VERSION_MAJOR}")
+    set(ZGET_PACKAGE_COMPATIBILITY SameMajorVersion)
+endif()
 set_target_properties(libzget PROPERTIES
     VERSION ${PROJECT_VERSION}
-    SOVERSION ${PROJECT_VERSION_MAJOR})
+    SOVERSION ${ZGET_SOVERSION})
 target_compile_definitions(libzget PUBLIC ZGET_SHARED)
 
 add_executable(zget cli/zget.c)
@@ -73,7 +82,7 @@ if(BUILD_TESTING OR ZGET_BUILD_FUZZERS)
     add_library(zget_parser_objects OBJECT
         src/error.c src/util.c src/source/source.c src/source/http-parse.c
         src/format/format.c src/format/zip/zip.c
-        src/format/zip/extract.c)
+        src/format/zip/zip-parse.c src/format/zip/extract.c)
     target_compile_features(zget_parser_objects PRIVATE c_std_99)
     target_include_directories(zget_parser_objects PRIVATE include src
         "${ZGET_GENERATED_INCLUDE_DIR}")
@@ -108,6 +117,7 @@ if(BUILD_TESTING)
 
     # Keep public output parameters deterministic even when validation fails.
     add_executable(zget_api_tests tests/test_api.c)
+    target_include_directories(zget_api_tests PRIVATE src)
     target_link_libraries(zget_api_tests PRIVATE Zget::libzget_static)
     add_test(NAME api_contracts COMMAND zget_api_tests)
 
@@ -183,7 +193,7 @@ configure_package_config_file(cmake/ZgetConfig.cmake.in
     ${CMAKE_CURRENT_BINARY_DIR}/ZgetConfig.cmake
     INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/Zget)
 write_basic_package_version_file(${CMAKE_CURRENT_BINARY_DIR}/ZgetConfigVersion.cmake
-    VERSION ${PROJECT_VERSION} COMPATIBILITY SameMajorVersion)
+    VERSION ${PROJECT_VERSION} COMPATIBILITY ${ZGET_PACKAGE_COMPATIBILITY})
 install(FILES ${CMAKE_CURRENT_BINARY_DIR}/ZgetConfig.cmake
               ${CMAKE_CURRENT_BINARY_DIR}/ZgetConfigVersion.cmake
         DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/Zget)

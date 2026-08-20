@@ -1,9 +1,13 @@
 #ifndef ZGET_VERSION_H
 #define ZGET_VERSION_H
 
+/** Compile-time libzget major version. */
 #define ZGET_VERSION_MAJOR @PROJECT_VERSION_MAJOR@
+/** Compile-time libzget minor version. */
 #define ZGET_VERSION_MINOR @PROJECT_VERSION_MINOR@
+/** Compile-time libzget patch version. */
 #define ZGET_VERSION_PATCH @PROJECT_VERSION_PATCH@
+/** Compile-time libzget version as MAJOR.MINOR.PATCH. */
 #define ZGET_VERSION_STRING "@PROJECT_VERSION@"
 
 #endif

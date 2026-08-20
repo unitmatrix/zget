@@ -16,9 +16,10 @@ The library joins two independent internal abstractions in `src/zget.c`:
 
 ZIP-specific state and code live under `src/format/zip/`, including EOCD and
 ZIP64 handling, streaming Central Directory parsing, Local Headers, STORE,
-DEFLATE, and CRC validation. Adding another format may extend selection inside
-the format layer, but must not require changes to an HTTP backend. Likewise,
-adding another source must not require changes to ZIP parsing.
+DEFLATE, and CRC validation. ZIP is selected directly; there is deliberately no
+format registry or plugin interface. Supporting another format requires an
+explicit product decision and must not require changes to an HTTP backend.
+Likewise, adding another source must not require changes to ZIP parsing.
 
 The format layer requests semantic exact or suffix ranges rather than treating
 a source as a seekable file. Preserve streaming callbacks, early-stop behavior,

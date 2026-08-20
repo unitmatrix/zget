@@ -185,7 +185,6 @@ int main(void)
     struct zget_format *format = NULL;
     struct output_buffer output = {0};
     struct member_buffer members = {0};
-    zget_entry entry;
     int rc;
 
     memory.data = bytes;
@@ -197,22 +196,11 @@ int main(void)
     rc = zget_format_open(&memory.source, &options, &error, &format);
     if (rc != ZGET_OK || format == NULL || memory.reads != 1)
         goto fail;
-    memset(&entry, 0, sizeof(entry));
-    rc = zget_format_find(format, "a.txt", &entry);
-    if (rc != ZGET_OK || entry.compressed_size != 5 ||
-        entry.uncompressed_size != 5 || entry.local_header_offset != 0 ||
-        entry.compression_method != 0 || memory.reads != 2)
-        goto fail;
-    rc = zget_format_extract(format, &entry, collect, &output);
-    if (rc != ZGET_OK || output.length != 5 ||
-        memcmp(output.data, "hello", 5) != 0 || memory.reads != 4)
-        goto fail;
-
-    /* The preferred operation keeps the ZIP locator inside the engine. */
+    /* Extraction keeps the ZIP locator entirely inside the format engine. */
     memset(&output, 0, sizeof(output));
     rc = zget_format_extract_member(format, "a.txt", collect, &output);
     if (rc != ZGET_OK || output.length != 5 ||
-        memcmp(output.data, "hello", 5) != 0 || memory.reads != 7)
+        memcmp(output.data, "hello", 5) != 0 || memory.reads != 4)
         goto fail;
 
     /* Listing traverses the same format engine and borrows one record at a time. */
@@ -224,17 +212,17 @@ int main(void)
                           ZGET_MEMBER_HAS_MODIFIED_TIME) ||
         members.modified_year != 2026 || members.modified_month != 4 ||
         members.modified_day != 8 || members.modified_hour != 13 ||
-        members.modified_minute != 40 || memory.reads != 8)
+        members.modified_minute != 40 || memory.reads != 5)
         goto fail;
     memset(&members, 0, sizeof(members));
     rc = zget_format_list(format, "a.txt", collect_member, &members);
-    if (rc != ZGET_OK || members.count != 1 || memory.reads != 9)
+    if (rc != ZGET_OK || members.count != 1 || memory.reads != 6)
         goto fail;
     rc = zget_format_list(format, NULL, reject_member, NULL);
-    if (rc != ZGET_EIO || memory.reads != 10)
+    if (rc != ZGET_EIO || memory.reads != 7)
         goto fail;
     rc = zget_format_list(format, "missing", collect_member, &members);
-    if (rc != ZGET_ENOTFOUND || memory.reads != 11)
+    if (rc != ZGET_ENOTFOUND || memory.reads != 8)
         goto fail;
 
     zget_format_close(format);

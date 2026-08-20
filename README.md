@@ -102,9 +102,8 @@ ZIP / zlib                         HTTP / libcurl
 ```
 
 The HTTP source knows nothing about ZIP layout, and the ZIP engine knows
-nothing about libcurl. Current public support remains ZIP/ZIP64; the separation
-is intended to permit other range-friendly container formats later without
-redesigning transport or CLI behavior. It is a small internal boundary, not a
+nothing about libcurl. This small internal boundary exists for clear ownership
+and independent testing; it is not a public extension point, registry, or
 dynamic plugin system.
 
 ## Build
@@ -147,31 +146,140 @@ installed `libzget`; curl, zlib, TLS, and the platform C runtime remain dynamic.
 
 ## Library
 
-The installed header is `<zget.h>`. Call `zget_global_init()` during
-single-threaded application startup, before creating any zget contexts, and
-match every successful call with `zget_global_cleanup()` during shutdown after
-all contexts are closed. The CLI handles this lifecycle automatically.
+`libzget` is the reusable implementation behind the `zget` CLI. Its installed
+header is `<zget.h>` and its public API deals only in URLs, opaque contexts,
+format-neutral member records, callbacks, and zget error codes. libcurl and
+zlib remain private implementation dependencies: applications do not include
+their headers or manipulate their handles to use the high-level API. Current
+library support is HTTP(S), single-volume ZIP/ZIP64, STORE, and DEFLATE.
 
-`zget_open_url_ex()` retains a diagnostic context even when opening fails;
+The library is pre-1.0. Its API and ABI may change between minor releases while
+the design is refined; patch releases preserve the ABI within one `0.MINOR`
+line. Compile-time version macros are available in `<zget_version.h>`, and
+`zget_version()` reports the linked library version at runtime.
+
+Link with pkg-config:
+
+```sh
+cc -o example example.c $(pkg-config --cflags --libs libzget)
+```
+
+Or use the installed CMake target `Zget::libzget` after
+`find_package(Zget 0.3 REQUIRED)`.
+
+### Minimal extraction example
+
+```c
+#include <zget.h>
+
+#include <stdio.h>
+
+static int write_stdout(void *userdata, const void *data, size_t size)
+{
+    FILE *output = userdata;
+    return fwrite(data, 1, size, output) == size ? 0 : 1;
+}
+
+int main(int argc, char **argv)
+{
+    zget_ctx *ctx = NULL;
+    int rc;
+
+    if (argc != 3) {
+        fprintf(stderr, "usage: %s URL MEMBER\n", argv[0]);
+        return 2;
+    }
+    rc = zget_global_init();
+    if (rc != ZGET_OK) {
+        fprintf(stderr, "zget: %s\n", zget_error_string(rc));
+        return 1;
+    }
+
+    rc = zget_open_url_ex(argv[1], NULL, &ctx);
+    if (rc == ZGET_OK)
+        rc = zget_extract_member(ctx, argv[2], write_stdout, stdout);
+    if (rc != ZGET_OK) {
+        const char *detail = ctx != NULL ? zget_last_error_message(ctx) : "";
+        fprintf(stderr, "zget: %s%s%s\n", zget_error_string(rc),
+                detail[0] != '\0' ? ": " : "", detail);
+    }
+
+    zget_close(ctx);
+    zget_global_cleanup();
+    return rc == ZGET_OK ? 0 : 1;
+}
+```
+
+The output callback borrows each buffer only for that callback invocation.
+Extraction may emit data before a later decompression, size, or CRC failure, so
+only a `ZGET_OK` return guarantees complete validated output. Applications that
+need atomic publication should stream to temporary storage and publish it only
+after success, as the CLI does for `-o`.
+
+### Listing
+
+`zget_list()` streams one borrowed, length-delimited record at a time and does
+not construct an archive-wide index. Pass NULL as the member path to list every
+entry, or an exact path to emit only the first match:
+
+```c
+static int print_member(void *userdata, const zget_member_info *member)
+{
+    FILE *output = userdata;
+
+    if (fwrite(member->name, 1, member->name_length, output) !=
+        member->name_length || fputc('\n', output) == EOF)
+        return 1;
+    return 0;
+}
+
+/* ctx is an open zget_ctx. */
+rc = zget_list(ctx, NULL, print_member, stdout);
+```
+
+The record and its name become invalid when the callback returns. Validated
+modification components are local calendar values because ZIP stores no
+timezone. When `ZGET_MEMBER_NAME_UTF8` is absent, the name contains legacy raw
+bytes and should be preserved or escaped rather than decoded by guesswork.
+
+### Lifecycle, limits, and threads
+
+Call `zget_global_init()` during single-threaded application startup and match
+every successful call with `zget_global_cleanup()` during shutdown after all
+contexts are closed. The CLI handles this lifecycle automatically.
+
+`zget_open_url_ex()` retains a diagnostic context on most opening failures;
 inspect it with `zget_last_error_message()` and always release it with
-`zget_close()`. `zget_open_url()` is the shorter API when only success or
-failure is needed. A context must not be used concurrently; after global
-initialization, different contexts may be used by different threads.
+`zget_close()`. `zget_open_url()` is shorter when only success or failure is
+needed, while `zget_get()` performs one open/extract/close sequence using
+default options.
 
-Use `zget_extract_member()` to locate and stream an exact member through an
-open context. The context can be reused for additional members without
-reopening the remote object. `zget_get()` is the one-call convenience form.
-Use `zget_list()` to receive one borrowed, length-delimited member record at a
-time without constructing an archive-wide index. Its optional exact member
-argument stops the metadata scan at the first match. Validated modification
-components remain local calendar values because ZIP stores no timezone.
-The original `zget_find()` and `zget_extract()` pair remains available for
-source and binary compatibility with applications that use ZIP metadata.
+A context must not be used concurrently or reentered from one of its callbacks.
+After global initialization, different contexts may be used by different
+threads. `max_output_size`, `max_metadata_bytes`, and `max_http_requests` let
+embedding applications impose defensive limits. The CLI leaves output and
+metadata sizes unrestricted. Always start custom options with
+`zget_options_init()`; the library copies the structure while opening.
 
-`max_output_size`, `max_metadata_bytes`, and `max_http_requests` let embedding
-applications impose defensive limits. The CLI leaves output and metadata sizes
-unrestricted. Always start with `zget_options_init()`; the recorded structure
-size lets newer libraries accept callers built with an older options layout.
+### Migrating to 0.3
+
+Version 0.3 removes the ZIP-specific `zget_entry`, `zget_find()`, and
+`zget_extract()` interface. Replace the old two-step extraction:
+
+```c
+zget_find(ctx, path, &entry);
+zget_extract(ctx, &entry, write_cb, userdata);
+```
+
+with the format-neutral operation:
+
+```c
+zget_extract_member(ctx, path, write_cb, userdata);
+```
+
+Use `zget_list(ctx, path, list_cb, userdata)` when only member metadata is
+needed. This keeps ZIP offsets, flags, compression details, and CRC state inside
+the library so those implementation details can evolve safely.
 
 ## HTTP invariants
 

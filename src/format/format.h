@@ -26,10 +26,6 @@ int zget_format_extract_member(struct zget_format *format, const char *member,
                                zget_write_cb write_cb, void *userdata);
 int zget_format_list(struct zget_format *format, const char *member,
                      zget_list_cb list_cb, void *userdata);
-int zget_format_find(struct zget_format *format, const char *member,
-                     zget_entry *entry);
-int zget_format_extract(struct zget_format *format, const zget_entry *entry,
-                        zget_write_cb write_cb, void *userdata);
 void zget_format_close(struct zget_format *format);
 
 #endif
