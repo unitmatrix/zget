@@ -86,6 +86,9 @@ tail -> central directory -> target local header -> target payload
 The first exact Central Directory name match wins. Extraction is streamed
 through STORE or raw-DEFLATE decoding and checked against the entry CRC32.
 
+See [ROADMAP.md](ROADMAP.md) for planned fallback behavior, remote archive
+queries, transfer visibility, performance work, and future formats.
+
 ## Architecture
 
 The CLI is a thin frontend over `libzget`. Internally, format code requests
@@ -283,7 +286,7 @@ the library so those implementation details can evolve safely.
 
 ## HTTP invariants
 
-Every response accepted as archive data must be a matching
+Every response currently accepted as archive data must be a matching
 `206 Partial Content` response with the correct body length. The initial tail
 normally uses a suffix range. If a server rejects or ignores that syntax but
 supports explicit ranges, zget uses a one-byte size probe and retries the tail
@@ -308,6 +311,8 @@ Stdout cannot be rolled back if a late error occurs.
   matching only when entirely ASCII; CP437 conversion is intentionally absent.
 - No encryption, split archives, resume, or random seeks within a DEFLATE
   member.
-- HTTP Range support is mandatory; there is no full-download fallback.
+- HTTP Range support is currently mandatory.
+
+See [ROADMAP.md](ROADMAP.md) for planned features and changes to current scope.
 
 This project is MIT licensed.
