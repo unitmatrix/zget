@@ -58,9 +58,12 @@ def run(binary):
         assert result.stdout == b"stored payload"
         assert result.stderr == b""
     finally:
-        server.shutdown()
+        # Diagnostic teardown: close the listening socket, but deliberately do
+        # not call shutdown() or join() here. The server thread is daemonized,
+        # so process exit will end it. If macOS now reports the subprocess
+        # timeout, zget is the blocker; if the test passes, HTTPServer teardown
+        # was the source of the previous 30-second hang.
         server.server_close()
-        thread.join()
 
 
 if __name__ == "__main__":
