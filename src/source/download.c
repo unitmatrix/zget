@@ -58,18 +58,12 @@ int zget_http_download_to_temp(const char *url,
     if (url == NULL || options == NULL || error == NULL || out_fd == NULL)
         return ZGET_EINVAL;
 
-    fprintf(stderr, "zget-debug: full download begin\n");
-    fflush(stderr);
-
     fd = mkstemp(path);
     if (fd < 0) {
         zget_error_set(error, ZGET_EIO, "create temporary file: %s",
                        strerror(errno));
         return ZGET_EIO;
     }
-    fprintf(stderr, "zget-debug: temp file created\n");
-    fflush(stderr);
-
     /* The fallback is an implementation detail; never expose a named file. */
     if (unlink(path) != 0) {
         int saved_errno = errno;
@@ -103,13 +97,7 @@ int zget_http_download_to_temp(const char *url,
     SETOPT(CURLOPT_USERAGENT, "zget/" ZGET_VERSION_STRING);
     SETOPT(CURLOPT_WRITEFUNCTION, download_write_cb);
     SETOPT(CURLOPT_WRITEDATA, &state);
-
-    fprintf(stderr, "zget-debug: full GET perform begin\n");
-    fflush(stderr);
     cc = curl_easy_perform(curl);
-    fprintf(stderr, "zget-debug: full GET perform end (%d)\n", (int)cc);
-    fflush(stderr);
-
     if (state.saved_errno != 0) {
         zget_error_set(error, ZGET_EIO, "write temporary file: %s",
                        strerror(state.saved_errno));
@@ -124,8 +112,6 @@ int zget_http_download_to_temp(const char *url,
     cc = curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &status);
     if (cc != CURLE_OK)
         goto curl_failure;
-    fprintf(stderr, "zget-debug: full GET status %ld\n", status);
-    fflush(stderr);
     if (status < 200 || status >= 300) {
         zget_error_set(error, ZGET_EHTTP,
                        "server returned HTTP %ld for complete download", status);
@@ -134,8 +120,6 @@ int zget_http_download_to_temp(const char *url,
     *out_fd = fd;
     fd = -1;
     rc = ZGET_OK;
-    fprintf(stderr, "zget-debug: full download ready\n");
-    fflush(stderr);
     goto done;
 
 curl_failure:
@@ -147,8 +131,6 @@ done:
         curl_easy_cleanup(curl);
     if (fd >= 0)
         close(fd);
-    fprintf(stderr, "zget-debug: full download end rc=%d\n", rc);
-    fflush(stderr);
     return rc;
 #undef SETOPT
 }
