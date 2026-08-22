@@ -85,9 +85,13 @@ jobs:
             ./package-consumer-pkg-config)"
           test "${pc_version}" = "${project_version}"
 
+          # Feed the consumer the version already read from VERSION above.
+          # This keeps VERSION as the only manually maintained release version
+          # while still testing CMake's installed-package compatibility check.
           cmake -S tests/package -B package-build \
             -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_PREFIX_PATH="${GITHUB_WORKSPACE}/stage/usr"
+            -DCMAKE_PREFIX_PATH="${GITHUB_WORKSPACE}/stage/usr" \
+            -DZGET_REQUIRED_VERSION="${project_version}"
           cmake --build package-build --parallel 2
           test "$(package-build/consumer_static)" = "${project_version}"
           shared_version="$(LD_LIBRARY_PATH="$(dirname "${library}")" \
@@ -121,11 +125,12 @@ jobs:
 
               # Exercise both exported library targets against musl. This is
               # compatibility coverage, not a fully static release build.
+              expected="$(cat /source/VERSION)"
               cmake -S /source/tests/package -B /tmp/package-build \
                 -DCMAKE_BUILD_TYPE=Release \
-                -DCMAKE_PREFIX_PATH=/tmp/stage/usr
+                -DCMAKE_PREFIX_PATH=/tmp/stage/usr \
+                -DZGET_REQUIRED_VERSION="${expected}"
               cmake --build /tmp/package-build --parallel 2
-              expected="$(cat /source/VERSION)"
               test "$(/tmp/package-build/consumer_static)" = "${expected}"
               shared="$(LD_LIBRARY_PATH=/tmp/stage/usr/lib \
                 /tmp/package-build/consumer)"
