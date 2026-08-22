@@ -1,11 +1,14 @@
 #include "internal.h"
 #include "format/format.h"
+#include "source/download.h"
+#include "source/file.h"
 #include "source/http.h"
 #include "source/source.h"
 
 #include <limits.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 /*
  * Global initialization is owned by the embedding application rather than by
@@ -81,6 +84,30 @@ static int copy_options(struct zget_ctx *ctx, const zget_options *options)
     return ZGET_OK;
 }
 
+/*
+ * Replace a Range source with a complete local snapshot. The failed Range
+ * attempt is deliberately discarded before starting the ordinary GET: the two
+ * transfer modes remain independent, and the format layer only ever sees one
+ * coherent source implementation at a time.
+ */
+static int open_downloaded_source(const char *archive_url,
+                                  const struct zget_http_options *http_options,
+                                  struct zget_error_state *error,
+                                  struct zget_source **out_source)
+{
+    int fd = -1;
+    int rc;
+
+    rc = zget_http_download_to_temp(archive_url, http_options, error, &fd);
+    if (rc != ZGET_OK)
+        return rc;
+
+    rc = zget_file_source_open_fd(fd, error, out_source);
+    if (rc != ZGET_OK)
+        (void)close(fd);
+    return rc;
+}
+
 int zget_open_url_ex(const char *archive_url, const zget_options *options,
                      zget_ctx **out_ctx)
 {
@@ -110,16 +137,35 @@ int zget_open_url_ex(const char *archive_url, const zget_options *options,
     if ((rc = zget_http_source_open(archive_url, &http_options, &ctx->error,
                                     &ctx->source)) != ZGET_OK)
         goto fail;
-    /*
-     * Public orchestration selects a source, then delegates all container
-     * discovery to the format layer. This is the only point where those two
-     * independently testable halves are joined.
-     */
+
     format_options.max_metadata_bytes = ctx->options.max_metadata_bytes;
     format_options.max_output_size = ctx->options.max_output_size;
-    if ((rc = zget_format_open(ctx->source, &format_options, &ctx->error,
-                               &ctx->format)) != ZGET_OK)
+    rc = zget_format_open(ctx->source, &format_options, &ctx->error,
+                          &ctx->format);
+    if (rc == ZGET_ERANGE) {
+        /*
+         * Range is an optimization, not a requirement for correctness. A 200
+         * response to the probe proves only that random access is unavailable;
+         * download the same URL through the same redirect policy and continue
+         * against an anonymous local snapshot. Other HTTP/protocol failures are
+         * intentionally not retried here because they do not prove this case.
+         */
+        zget_format_close(ctx->format);
+        ctx->format = NULL;
+        zget_source_close(ctx->source);
+        ctx->source = NULL;
+        ctx->error.code = ZGET_OK;
+        ctx->error.message[0] = '\0';
+
+        rc = open_downloaded_source(archive_url, &http_options, &ctx->error,
+                                    &ctx->source);
+        if (rc == ZGET_OK)
+            rc = zget_format_open(ctx->source, &format_options, &ctx->error,
+                                  &ctx->format);
+    }
+    if (rc != ZGET_OK)
         goto fail;
+
     ctx->ready = true;
     *out_ctx = ctx;
     return ZGET_OK;
