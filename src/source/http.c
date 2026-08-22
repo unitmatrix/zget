@@ -24,12 +24,6 @@ struct zget_http_source {
     uint32_t max_redirects;
 };
 
-/*
- * Per-transfer state is intentionally separate from the persistent source.
- * Only headers from libcurl's final request are loaded, so redirects and
- * informational responses cannot contribute range metadata or an object
- * validator.
- */
 struct response {
     struct zget_http_source *http;
     zget_source_write_cb cb;
@@ -55,15 +49,6 @@ struct response {
     char *etag;
 };
 
-/* Content-Range grammar parsing lives in util.c so it has no libcurl
- * dependency and can be exercised by a standalone fuzz target. */
-
-/*
- * Load only the final request's ordinary response headers. curl_easy_header()
- * owns and normalizes the header storage; zget retains only the ETag that must
- * survive later requests. This function is safe from a body callback, which is
- * how validation remains ahead of every byte exposed to a source consumer.
- */
 static bool response_load_headers(struct response *r)
 {
     struct curl_header *header;
@@ -81,7 +66,6 @@ static bool response_load_headers(struct response *r)
     hc = curl_easy_header(r->http->curl, "Content-Range", 0, CURLH_HEADER,
                           -1, &header);
     if (hc == CURLHE_OK) {
-        /* Content-Range is a singleton; duplicates are inherently ambiguous. */
         if (header->amount != 1 ||
             !zget_parse_content_range(header->value, &r->range_start,
                                       &r->range_end, &r->range_total))
@@ -101,7 +85,6 @@ static bool response_load_headers(struct response *r)
                                   CURLH_HEADER, -1, &header);
             if (hc != CURLHE_OK)
                 goto header_failure;
-            /* Every listed coding must preserve the identity representation. */
             if (strcasecmp(header->value, "identity") != 0)
                 r->bad_encoding = true;
         }
@@ -111,7 +94,6 @@ static bool response_load_headers(struct response *r)
 
     hc = curl_easy_header(r->http->curl, "ETag", 0, CURLH_HEADER, -1, &header);
     if (hc == CURLHE_OK) {
-        /* ETag is also a singleton; choosing among duplicates is unsafe. */
         if (header->amount != 1)
             r->bad_etag = true;
         else {
@@ -150,13 +132,6 @@ static bool response_range_valid(const struct response *r)
 {
     uint64_t wanted, expected_start;
 
-    /*
-     * Source offsets are meaningful only if the server returned the precise
-     * bytes requested. A 206 alone is insufficient: verify the unit, inclusive
-     * endpoints, total object size, and suffix semantics before accepting data.
-     * For a suffix longer than the object, RFC range behavior returns the whole
-     * object; exact ranges must always retain their requested length.
-     */
     if (r->status != 206 || !r->have_content_range || r->bad_content_range ||
         r->range_total == 0 ||
         r->range_end >= r->range_total || r->range_start > r->range_end)
@@ -173,13 +148,6 @@ static bool starts_with(const char *s, const char *prefix)
     return strncmp(s, prefix, strlen(prefix)) == 0;
 }
 
-/*
- * Some otherwise Range-capable servers reject the suffix form (bytes=-N)
- * while accepting explicit byte intervals. HTTP 200 means the server ignored
- * the suffix; 400, 416, and 501 are responses seen for rejected syntax. Do not
- * retry a malformed 206: accepting a second interpretation of contradictory
- * range metadata would weaken the byte-identity checks below.
- */
 static bool suffix_status_allows_fallback(long status)
 {
     return status == 200 || status == 400 || status == 416 || status == 501;
@@ -194,16 +162,6 @@ static enum zget_source_action discard_range(void *userdata, const void *data,
     return ZGET_SOURCE_CONTINUE;
 }
 
-/*
- * Prove that this response belongs to the same remote object established by
- * the first request before any body reaches a consumer. If this check were
- * deferred until curl_easy_perform() returned, changed bytes could already
- * have escaped and an intentional early stop could skip validation entirely.
- *
- * The first tail response establishes identity only after its complete body is
- * accepted. Later responses can be checked immediately because the size and,
- * when available, strong ETag are immutable source identity state.
- */
 static bool response_identity_valid(struct response *r)
 {
     if (r->identity_checked)
@@ -235,11 +193,6 @@ static size_t body_cb(char *data, size_t size, size_t nmemb, void *opaque)
     if (nmemb != 0 && size > SIZE_MAX / nmemb)
         return 0;
     n = size * nmemb;
-    /*
-     * Validate final-response metadata before forwarding even the first byte.
-     * A server that ignores Range is therefore stopped immediately, and a
-     * transformed representation can never reach a source consumer.
-     */
     if (!response_load_headers(r) || !response_range_valid(r) ||
         r->bad_encoding || r->bad_etag || !response_identity_valid(r))
         return 0;
@@ -260,11 +213,6 @@ static size_t body_cb(char *data, size_t size, size_t nmemb, void *opaque)
     return n;
 }
 
-/*
- * Execute exactly one HTTP byte-range request and validate it as an atomic
- * operation. No caller sees bytes until final-response headers prove that they
- * correspond to the requested interval and identity representation.
- */
 static int perform_range(struct zget_http_source *http, uint64_t offset,
                          uint64_t length, bool suffix,
                          zget_source_write_cb cb, void *userdata,
@@ -313,10 +261,6 @@ static int perform_range(struct zget_http_source *http, uint64_t offset,
     r.suffix = suffix;
     request_url = http->effective_url != NULL ? http->effective_url : http->url;
 
-    /*
-     * Do not use CURLOPT_ACCEPT_ENCODING: enabling transparent decoding would
-     * sever the relationship between HTTP byte positions and source offsets.
-     */
     headers = curl_slist_append(NULL, "Accept-Encoding: identity");
     if (headers == NULL) {
         zget_error_set(http->source.error, ZGET_ENOMEM,
@@ -338,7 +282,6 @@ static int perform_range(struct zget_http_source *http, uint64_t offset,
         }
         (void)snprintf(if_match, sizeof("If-Match: ") + etag_length,
                        "If-Match: %s", http->strong_etag);
-        /* A strong validator makes every later metadata/payload request conditional. */
         next = curl_slist_append(headers, if_match);
         if (next == NULL) {
             zget_error_set(http->source.error, ZGET_ENOMEM,
@@ -355,12 +298,18 @@ static int perform_range(struct zget_http_source *http, uint64_t offset,
     SETOPT(CURLOPT_WRITEFUNCTION, body_cb);
     SETOPT(CURLOPT_WRITEDATA, &r);
     ++http->requests;
-    cc = curl_easy_perform(http->curl);
 
-    /* Zero-length/error responses may never invoke body_cb; inspect them here. */
+    fprintf(stderr, "zget-debug: range perform begin suffix=%d range=%s\n",
+            suffix ? 1 : 0, range);
+    fflush(stderr);
+    cc = curl_easy_perform(http->curl);
+    fprintf(stderr, "zget-debug: range perform end curl=%d\n", (int)cc);
+    fflush(stderr);
+
     if (!response_load_headers(&r))
         goto done;
-    /* Preserve the precise identity error set before body_cb stopped curl. */
+    fprintf(stderr, "zget-debug: range status=%ld\n", r.status);
+    fflush(stderr);
     if (r.identity_checked && !r.identity_valid)
         goto done;
     if (r.callback_failed) {
@@ -370,15 +319,13 @@ static int perform_range(struct zget_http_source *http, uint64_t offset,
         goto done;
     }
     if (r.callback_stopped) {
-        /*
-         * The consumer has all bytes it needs. libcurl reports its short write
-         * as an error, but cancellation is the desired performance path.
-         */
         http->source.error->code = ZGET_OK;
         http->source.error->message[0] = '\0';
         goto done;
     }
     if (r.status == 200) {
+        fprintf(stderr, "zget-debug: range ignored with HTTP 200\n");
+        fflush(stderr);
         if (suffix && suffix_fallback != NULL)
             *suffix_fallback = true;
         zget_error_set(http->source.error, ZGET_ERANGE,
@@ -410,12 +357,6 @@ static int perform_range(struct zget_http_source *http, uint64_t offset,
         goto done;
     }
     if (r.bad_encoding) {
-        /*
-         * The server did answer the Range request, but transformed the
-         * representation. That is a response-validation failure, not evidence
-         * that Range itself is unavailable; retrying as a full download would
-         * silently weaken the byte-identity contract.
-         */
         zget_error_set(http->source.error, ZGET_EHTTP,
                        "server returned a non-identity Content-Encoding");
         goto done;
@@ -425,11 +366,9 @@ static int perform_range(struct zget_http_source *http, uint64_t offset,
                        "server returned multiple ETag headers");
         goto done;
     }
-    /* Also cover a response whose body was empty and never invoked body_cb. */
     if (!response_identity_valid(&r))
         goto done;
     expected = r.range_end - r.range_start + 1;
-    /* Content-Range can be correct while the connection body is truncated. */
     if (r.body_length != expected) {
         zget_error_set(http->source.error, ZGET_EHTTP,
                        "truncated HTTP range body");
@@ -441,7 +380,6 @@ static int perform_range(struct zget_http_source *http, uint64_t offset,
         goto done;
     }
     if (!http->source.size_known) {
-        /* Weak ETags cannot safely back If-Match and are deliberately ignored. */
         http->source.size = r.range_total;
         http->source.size_known = true;
         if (r.etag != NULL && !starts_with(r.etag, "W/")) {
@@ -451,7 +389,6 @@ static int perform_range(struct zget_http_source *http, uint64_t offset,
     }
     if (curl_easy_getinfo(http->curl, CURLINFO_EFFECTIVE_URL, &effective) == CURLE_OK &&
         effective != NULL && http->effective_url == NULL) {
-        /* Reuse the resolved URL so later ranges do not replay an expiring chain. */
         http->effective_url = zget_strdup(effective);
         if (http->effective_url == NULL) {
             zget_error_set(http->source.error, ZGET_ENOMEM,
@@ -463,7 +400,6 @@ static int perform_range(struct zget_http_source *http, uint64_t offset,
     http->source.error->message[0] = '\0';
 
 done:
-    /* curl_slist does not copy ownership to the easy handle. Detach before free. */
     free(r.etag);
     free(if_match);
     curl_slist_free_all(headers);
@@ -498,13 +434,6 @@ static int http_read_suffix(struct zget_source *source, uint64_t length,
     if (rc == ZGET_OK || !fallback)
         return rc;
 
-    /*
-     * A one-byte explicit request obtains the total size from Content-Range
-     * without relying on HEAD metadata or downloading the object. Its byte is
-     * deliberately discarded: the caller requested the tail, not byte zero.
-     * A successful probe also establishes the effective URL and object ETag,
-     * so the following tail request retains the normal identity guarantees.
-     */
     http->source.error->code = ZGET_OK;
     http->source.error->message[0] = '\0';
     rc = perform_range(http, 0, 1, false, discard_range, NULL, NULL);
@@ -575,7 +504,6 @@ int zget_http_source_open(const char *url,
         uc = curl_url_get(parsed_url, CURLUPART_SCHEME, &scheme, 0);
     if (uc != CURLUE_OK) {
         int rc = uc == CURLUE_OUT_OF_MEMORY ? ZGET_ENOMEM : ZGET_EINVAL;
-
         zget_error_set(error, rc, "invalid URL: %s", curl_url_strerror(uc));
         curl_free(scheme);
         curl_url_cleanup(parsed_url);
@@ -611,12 +539,6 @@ int zget_http_source_open(const char *url,
 #define SETOPT(opt, value) do { \
     cc = curl_easy_setopt(http_source->curl, opt, value); \
     if (cc != CURLE_OK) goto fail; } while (0)
-    /*
-     * libcurl does not forward credentials to unrelated hosts unless explicitly
-     * requested; zget never enables unrestricted authentication. Protocol lists
-     * also prevent redirects from escaping HTTP(S), and HTTPS origins receive
-     * the stricter HTTPS-only redirect set to forbid downgrade.
-     */
     SETOPT(CURLOPT_FOLLOWLOCATION, 1L);
     SETOPT(CURLOPT_MAXREDIRS, (long)http_source->max_redirects);
     SETOPT(CURLOPT_PROTOCOLS_STR, "http,https");
