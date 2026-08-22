@@ -1,5 +1,32 @@
 """Controllable HTTP Range fixture used by zget integration tests."""
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+import socketserver
+from http.server import BaseHTTPRequestHandler, HTTPServer, ThreadingHTTPServer
+
+
+class NoReverseDNSHTTPServer(HTTPServer):
+    """HTTPServer variant whose loopback bind performs no reverse DNS lookup.
+
+    ``http.server.HTTPServer.server_bind()`` calls ``socket.getfqdn()`` after
+    binding. That hostname lookup is unnecessary for these loopback-only test
+    fixtures and can take tens of seconds on some CI images. Bind through the
+    underlying TCPServer directly and retain the literal host instead.
+    """
+
+    def server_bind(self):
+        socketserver.TCPServer.server_bind(self)
+        host, port = self.server_address[:2]
+        self.server_name = host
+        self.server_port = port
+
+
+class NoReverseDNSThreadingHTTPServer(ThreadingHTTPServer):
+    """Threaded counterpart of NoReverseDNSHTTPServer for Range fixtures."""
+
+    def server_bind(self):
+        socketserver.TCPServer.server_bind(self)
+        host, port = self.server_address[:2]
+        self.server_name = host
+        self.server_port = port
 
 
 class RangeHandler(BaseHTTPRequestHandler):
@@ -146,5 +173,5 @@ def serve(data, mode="normal"):
     Handler.data = data
     Handler.mode = mode
     Handler.requests = 0
-    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    server = NoReverseDNSThreadingHTTPServer(("127.0.0.1", 0), Handler)
     return server

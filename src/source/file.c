@@ -95,12 +95,51 @@ static const struct zget_source_ops file_ops = {
     file_close
 };
 
-int zget_file_source_open(const char *path, struct zget_error_state *error,
-                          struct zget_source **out_source)
+int zget_file_source_open_fd(int fd, struct zget_error_state *error,
+                             struct zget_source **out_source)
 {
     struct zget_file_source *file;
     struct stat st;
-    int fd;
+
+    if (out_source != NULL)
+        *out_source = NULL;
+    if (fd < 0 || error == NULL || out_source == NULL)
+        return ZGET_EINVAL;
+
+    /*
+     * Ownership does not transfer until every fallible setup step succeeds.
+     * Callers can therefore use one simple rule: close fd after failure, and
+     * let zget_source_close() release it after success.
+     */
+    if (fstat(fd, &st) != 0) {
+        int saved_errno = errno;
+        zget_error_set(error, ZGET_EIO, "stat local file: %s",
+                       strerror(saved_errno));
+        return ZGET_EIO;
+    }
+    if (st.st_size <= 0) {
+        zget_error_set(error, ZGET_EINVAL, "local file is empty");
+        return ZGET_EINVAL;
+    }
+
+    file = calloc(1, sizeof(*file));
+    if (file == NULL) {
+        zget_error_set(error, ZGET_ENOMEM, "allocating local file source");
+        return ZGET_ENOMEM;
+    }
+
+    zget_source_init(&file->source, &file_ops, error);
+    file->fd = fd;
+    file->source.size = (uint64_t)st.st_size;
+    file->source.size_known = true;
+    *out_source = &file->source;
+    return ZGET_OK;
+}
+
+int zget_file_source_open(const char *path, struct zget_error_state *error,
+                          struct zget_source **out_source)
+{
+    int fd, rc;
 
     if (out_source != NULL)
         *out_source = NULL;
@@ -114,30 +153,9 @@ int zget_file_source_open(const char *path, struct zget_error_state *error,
                        strerror(saved_errno));
         return ZGET_EIO;
     }
-    if (fstat(fd, &st) != 0) {
-        int saved_errno = errno;
-        (void)close(fd);
-        zget_error_set(error, ZGET_EIO, "stat local file: %s",
-                       strerror(saved_errno));
-        return ZGET_EIO;
-    }
-    if (st.st_size <= 0) {
-        (void)close(fd);
-        zget_error_set(error, ZGET_EINVAL, "local file is empty");
-        return ZGET_EINVAL;
-    }
 
-    file = calloc(1, sizeof(*file));
-    if (file == NULL) {
+    rc = zget_file_source_open_fd(fd, error, out_source);
+    if (rc != ZGET_OK)
         (void)close(fd);
-        zget_error_set(error, ZGET_ENOMEM, "allocating local file source");
-        return ZGET_ENOMEM;
-    }
-
-    zget_source_init(&file->source, &file_ops, error);
-    file->fd = fd;
-    file->source.size = (uint64_t)st.st_size;
-    file->source.size_known = true;
-    *out_source = &file->source;
-    return ZGET_OK;
+    return rc;
 }
