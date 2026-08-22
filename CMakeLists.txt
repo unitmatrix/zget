@@ -140,6 +140,13 @@ if(BUILD_TESTING)
             COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/integration.py
                     $<TARGET_FILE:zget>)
         set_tests_properties(integration_reference PROPERTIES TIMEOUT 90)
+        # Keep the no-Range behavior isolated: this small fixture makes the
+        # fallback contract obvious without coupling it to the large oracle.
+        add_test(NAME integration_no_range_fallback
+            COMMAND ${Python3_EXECUTABLE}
+                    ${CMAKE_CURRENT_SOURCE_DIR}/tests/no_range_fallback.py
+                    $<TARGET_FILE:zget>)
+        set_tests_properties(integration_no_range_fallback PROPERTIES TIMEOUT 30)
     endif()
     if(Python3_Interpreter_FOUND AND ZGET_BUILD_LARGE_TESTS)
         add_test(NAME integration_100k_entries
