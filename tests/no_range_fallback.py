@@ -14,6 +14,8 @@ import sys
 import threading
 import zipfile
 
+from range_server import NoReverseDNSHTTPServer
+
 
 def make_archive():
     """Build the smallest archive needed to exercise fallback extraction."""
@@ -46,21 +48,21 @@ class IgnoreRangeHandler(http.server.BaseHTTPRequestHandler):
 def run(binary):
     """Prove transparent fallback with one focused extraction scenario."""
     IgnoreRangeHandler.archive = make_archive()
-    server = http.server.HTTPServer(("127.0.0.1", 0), IgnoreRangeHandler)
+    server = NoReverseDNSHTTPServer(("127.0.0.1", 0), IgnoreRangeHandler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     try:
         url = "http://127.0.0.1:{}/archive.zip".format(server.server_port)
         result = subprocess.run([binary, url, "stored.txt"], check=True,
                                 stdout=subprocess.PIPE,
+                                stderr=subprocess.PIPE,
                                 timeout=10)
         assert result.stdout == b"stored payload"
+        assert result.stderr == b""
     finally:
-        # Diagnostic teardown: close the listening socket, but deliberately do
-        # not call shutdown() or join() here. The server thread is daemonized,
-        # so process exit will end it. stderr is inherited on purpose so the
-        # temporary C-level fallback markers appear directly in CI logs.
+        server.shutdown()
         server.server_close()
+        thread.join()
 
 
 if __name__ == "__main__":
