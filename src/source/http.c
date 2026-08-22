@@ -410,7 +410,13 @@ static int perform_range(struct zget_http_source *http, uint64_t offset,
         goto done;
     }
     if (r.bad_encoding) {
-        zget_error_set(http->source.error, ZGET_ERANGE,
+        /*
+         * The server did answer the Range request, but transformed the
+         * representation. That is a response-validation failure, not evidence
+         * that Range itself is unavailable; retrying as a full download would
+         * silently weaken the byte-identity contract.
+         */
+        zget_error_set(http->source.error, ZGET_EHTTP,
                        "server returned a non-identity Content-Encoding");
         goto done;
     }
