@@ -16,6 +16,9 @@ import time
 import zipfile
 
 
+SUBPROCESS_TIMEOUT = 5
+
+
 def make_archive():
     """Build a small archive containing both stored and deflated members."""
     output = io.BytesIO()
@@ -52,6 +55,17 @@ def mark(start, message):
           file=sys.stderr, flush=True)
 
 
+def run_command(arguments, stage):
+    """Bound each CLI invocation so a CI hang identifies the exact operation."""
+    try:
+        return subprocess.run(arguments, check=True, stdout=subprocess.PIPE,
+                              stderr=subprocess.PIPE,
+                              timeout=SUBPROCESS_TIMEOUT)
+    except subprocess.TimeoutExpired as error:
+        raise RuntimeError("{} timed out after {} seconds".format(
+            stage, SUBPROCESS_TIMEOUT)) from error
+
+
 def run(binary):
     """Exercise extraction and both listing modes through the fallback path."""
     start = time.monotonic()
@@ -65,30 +79,23 @@ def run(binary):
     try:
         url = "http://127.0.0.1:{}/archive.zip".format(server.server_port)
 
-        result = subprocess.run([binary, url, "stored.txt"], check=True,
-                                stdout=subprocess.PIPE,
-                                stderr=subprocess.PIPE)
+        result = run_command([binary, url, "stored.txt"], "stored extraction")
         assert result.stdout == b"stored payload"
         assert result.stderr == b""
         mark(start, "stored extraction complete")
 
-        result = subprocess.run([binary, url, "deflated.txt"], check=True,
-                                stdout=subprocess.PIPE,
-                                stderr=subprocess.PIPE)
+        result = run_command([binary, url, "deflated.txt"],
+                             "deflated extraction")
         assert result.stdout == b"deflated payload " * 64
         assert result.stderr == b""
         mark(start, "deflated extraction complete")
 
-        result = subprocess.run([binary, "-1", url], check=True,
-                                stdout=subprocess.PIPE,
-                                stderr=subprocess.PIPE)
+        result = run_command([binary, "-1", url], "short listing")
         assert result.stdout == b"stored.txt\ndeflated.txt\n"
         assert result.stderr == b""
         mark(start, "short listing complete")
 
-        result = subprocess.run([binary, "-l", url], check=True,
-                                stdout=subprocess.PIPE,
-                                stderr=subprocess.PIPE)
+        result = run_command([binary, "-l", url], "long listing")
         assert b"stored.txt" in result.stdout
         assert b"deflated.txt" in result.stdout
         assert result.stderr == b""
