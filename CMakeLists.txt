@@ -43,6 +43,13 @@ foreach(target IN ITEMS libzget libzget_static)
         C_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN YES)
     target_compile_features(${target} PUBLIC c_std_99)
     target_compile_definitions(${target} PRIVATE ZGET_BUILDING)
+    # Internal Unix sources use POSIX APIs such as pread() and mkstemp().
+    # Request their declarations explicitly instead of relying on libc-specific
+    # default feature sets; strict Clang builds intentionally do not expose
+    # undeclared functions as a compatibility extension.
+    if(UNIX)
+        target_compile_definitions(${target} PRIVATE _POSIX_C_SOURCE=200809L)
+    endif()
     target_include_directories(${target} PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
         $<BUILD_INTERFACE:${ZGET_GENERATED_INCLUDE_DIR}>
