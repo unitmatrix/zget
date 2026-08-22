@@ -1,11 +1,13 @@
 # zget
 
-Fetch one file from a remote ZIP archive without downloading the whole archive.
+Fetch one file from a remote ZIP archive while downloading only the bytes needed when the server supports HTTP Range requests.
 
 `zget` is a command-line tool and C library for listing and extracting
-individual files from remote ZIP and ZIP64 archives over HTTP Range requests.
-It streams archive metadata with memory usage independent of entry count, so
-the same design works for ordinary archives and scales to very large ones.
+individual files from remote ZIP and ZIP64 archives. It prefers precise HTTP
+Range requests and transparently falls back to a complete temporary download
+when a server ignores Range requests entirely. It streams archive metadata with
+memory usage independent of entry count, so the same design works for ordinary
+archives and scales to very large ones.
 
 ```sh
 zget https://example.com/archive.zip README.txt
@@ -53,10 +55,11 @@ the same safe escaping.
 Remote ZIP access is not unique to zget. Python projects such as
 [`remotezip`](https://github.com/gtsystem/python-remotezip) and
 [`unzip-http`](https://github.com/saulpw/unzip-http) already list and extract
-members over HTTP without downloading the whole archive. `zget` is a native C
-library and CLI for efficient remote ZIP/ZIP64 access. Its streaming,
-bounded-memory design works for ordinary archives and remains practical as
-archive sizes and entry counts grow, with predictable Range behavior.
+members over HTTP without downloading the whole archive when Range requests are
+available. `zget` is a native C library and CLI for efficient remote ZIP/ZIP64
+access. Its streaming, bounded-memory design works for ordinary archives and
+remains practical as archive sizes and entry counts grow, with predictable
+Range behavior and a compatibility fallback for servers that ignore Range.
 
 `zget` streams the Central Directory, discards metadata for non-matching entries
 immediately, and can stop scanning as soon as the requested entry is found. It
@@ -77,11 +80,18 @@ for archives containing hundreds of thousands, millions, or tens of millions
 of entries; scan time and transferred metadata still depend on the target's
 position in the Central Directory.
 
-A successful lookup uses semantically precise HTTP Range requests:
+When the server supports Range requests, a successful lookup uses semantically
+precise byte ranges:
 
 ```text
 tail -> central directory -> target local header -> target payload
 ```
+
+If the server ignores Range requests entirely and returns the complete object,
+zget downloads the archive once into anonymous temporary storage and continues
+through the same local source and ZIP implementation. The operation remains
+transparent to callers, but it necessarily transfers the whole archive and
+therefore loses the bandwidth advantage of Range-based access.
 
 The first exact Central Directory name match wins. Extraction is streamed
 through STORE or raw-DEFLATE decoding and checked against the entry CRC32.
@@ -283,17 +293,24 @@ the library so those implementation details can evolve safely.
 
 ## HTTP invariants
 
-Every response accepted as archive data must be a matching
-`206 Partial Content` response with the correct body length. The initial tail
-normally uses a suffix range. If a server rejects or ignores that syntax but
-supports explicit ranges, zget uses a one-byte size probe and retries the tail
-as an explicit interval. These extra requests count toward
+Range-capable servers must return each accepted archive-data response as a
+matching `206 Partial Content` response with the correct body length. The
+initial tail normally uses a suffix range. If a server rejects or ignores that
+syntax but supports explicit ranges, zget uses a one-byte size probe and retries
+the tail as an explicit interval. These extra requests count toward
 `max_http_requests`.
+
+If a server ignores the required Range request entirely and returns HTTP 200
+with the complete representation, zget falls back to one complete download in
+anonymous temporary storage and continues through the local-file source. This
+fallback preserves extraction and listing behavior, but it transfers the entire
+archive and does not provide Range-based bandwidth savings.
+
 An inconsistent `Content-Range`, changed object size, non-identity
-`Content-Encoding`, or failed `If-Match` aborts the operation. HTTPS redirects
-cannot downgrade to HTTP. A strong ETag from the first accepted response is
-used for later `If-Match` requests. Without one, consistency is best-effort and
-still checks the object size.
+`Content-Encoding`, or failed `If-Match` aborts the Range operation. HTTPS
+redirects cannot downgrade to HTTP. A strong ETag from the first accepted
+response is used for later `If-Match` requests. Without one, consistency is
+best-effort and still checks the object size.
 
 `-o` writes a temporary file in the destination directory and publishes it only
 after decompression and CRC validation. Existing paths are never overwritten.
@@ -308,6 +325,7 @@ Stdout cannot be rolled back if a late error occurs.
   matching only when entirely ASCII; CP437 conversion is intentionally absent.
 - No encryption, split archives, resume, or random seeks within a DEFLATE
   member.
-- HTTP Range support is mandatory; there is no full-download fallback.
+- HTTP Range is preferred for efficient remote access. Servers that ignore
+  Range entirely are supported through a transparent complete-download fallback.
 
 This project is MIT licensed.

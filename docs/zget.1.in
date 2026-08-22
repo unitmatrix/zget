@@ -1,4 +1,4 @@
-.TH ZGET 1 "August 19, 2026" "zget @PROJECT_VERSION@" "User Commands"
+.TH ZGET 1 "August 22, 2026" "zget @PROJECT_VERSION@" "User Commands"
 .SH NAME
 zget \- fetch one member from a remote ZIP archive
 .SH SYNOPSIS
@@ -24,15 +24,18 @@ zget \- fetch one member from a remote ZIP archive
 .B \-\-version
 .SH DESCRIPTION
 .B zget
-fetches one exact, case-sensitive member from a remote ZIP or ZIP64 archive
-without downloading the entire archive.
-It requires HTTP Range support and does not fall back to a full download.
+fetches one exact, case-sensitive member from a remote ZIP or ZIP64 archive.
+It prefers HTTP Range requests so only the required archive bytes are
+transferred. If a server ignores Range requests entirely and returns the
+complete representation, zget transparently downloads the archive into
+anonymous temporary storage and continues locally. That compatibility fallback
+necessarily transfers the entire archive.
 .PP
-The Central Directory is parsed as an HTTP stream. Metadata for each
-non-matching entry is discarded immediately, so memory use is independent of
-the archive entry count. The Central Directory transfer stops when the first
-exact name match is found. The member payload is then streamed through STORE
-or raw-DEFLATE decoding and checked against its ZIP CRC32.
+The Central Directory is parsed as a stream. Metadata for each non-matching
+entry is discarded immediately, so memory use is independent of the archive
+entry count. With Range-capable servers, the Central Directory transfer stops
+when the first exact name match is found. The member payload is then streamed
+through STORE or raw-DEFLATE decoding and checked against its ZIP CRC32.
 .PP
 For extraction, both a
 .I URL
@@ -84,15 +87,23 @@ Show command usage and exit.
 .TP
 .B \-\-version
 Show the zget version and exit.
-.SH HTTP REQUIREMENTS
-Each response accepted as archive data must be a matching 206 Partial Content
-response with an identity Content-Encoding and the expected Content-Range and
-body length. If a server rejects or ignores the initial suffix range but
-supports explicit ranges, zget uses a one-byte size probe and retries the tail
-as an explicit interval. These extra requests count toward the configured HTTP
-request limit. HTTPS redirects may not downgrade to HTTP. A strong ETag, when
-supplied by the server, is used with subsequent requests to ensure that all
-ranges refer to the same archive version.
+.SH HTTP BEHAVIOR
+For Range-capable servers, each response accepted as archive data must be a
+matching 206 Partial Content response with an identity Content-Encoding and the
+expected Content-Range and body length. If a server rejects or ignores the
+initial suffix range but supports explicit ranges, zget uses a one-byte size
+probe and retries the tail as an explicit interval. These extra requests count
+toward the configured HTTP request limit.
+.PP
+If the server ignores a required Range request entirely and returns HTTP 200
+with the complete representation, zget performs one complete download into an
+anonymous temporary file and continues through its local-file source. This
+preserves normal extraction and listing semantics but forfeits the bandwidth
+savings of Range-based access.
+.PP
+HTTPS redirects may not downgrade to HTTP. A strong ETag, when supplied by the
+server, is used with subsequent Range requests to ensure that all ranges refer
+to the same archive version.
 .SH EXIT STATUS
 .TP
 .B 0
@@ -143,7 +154,8 @@ zget -1 https://example.com/archive.zip
 Only single-volume ZIP32 and ZIP64 archives are supported. Member names are
 exact full paths; there is no path normalization or globbing. Compression
 methods are limited to STORE and DEFLATE. Encryption and split archives are
-not supported.
+not supported. Servers that ignore HTTP Range are supported by a complete
+fallback download, so such operations may transfer the entire archive.
 .SH SEE ALSO
 .BR curl (1),
 .BR unzip (1),
