@@ -29,8 +29,8 @@ find_package(ZLIB REQUIRED)
 
 set(ZGET_LIBRARY_SOURCES
     src/zget.c src/error.c src/util.c src/source/source.c
-    src/source/http-parse.c src/source/http.c
-    src/format/format.c src/format/zip/zip.c
+    src/source/http-parse.c src/source/http.c src/source/download.c
+    src/source/file.c src/format/format.c src/format/zip/zip.c
     src/format/zip/zip-parse.c src/format/zip/extract.c)
 
 add_library(libzget SHARED ${ZGET_LIBRARY_SOURCES})
@@ -43,6 +43,13 @@ foreach(target IN ITEMS libzget libzget_static)
         C_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN YES)
     target_compile_features(${target} PUBLIC c_std_99)
     target_compile_definitions(${target} PRIVATE ZGET_BUILDING)
+    # Internal Unix sources use POSIX APIs such as pread() and mkstemp().
+    # Request their declarations explicitly instead of relying on libc-specific
+    # default feature sets; strict Clang builds intentionally do not expose
+    # undeclared functions as a compatibility extension.
+    if(UNIX)
+        target_compile_definitions(${target} PRIVATE _POSIX_C_SOURCE=200809L)
+    endif()
     target_include_directories(${target} PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
         $<BUILD_INTERFACE:${ZGET_GENERATED_INCLUDE_DIR}>
@@ -140,6 +147,13 @@ if(BUILD_TESTING)
             COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/integration.py
                     $<TARGET_FILE:zget>)
         set_tests_properties(integration_reference PROPERTIES TIMEOUT 90)
+        # Keep the no-Range behavior isolated: this small fixture makes the
+        # fallback contract obvious without coupling it to the large oracle.
+        add_test(NAME integration_no_range_fallback
+            COMMAND ${Python3_EXECUTABLE}
+                    ${CMAKE_CURRENT_SOURCE_DIR}/tests/no_range_fallback.py
+                    $<TARGET_FILE:zget>)
+        set_tests_properties(integration_no_range_fallback PROPERTIES TIMEOUT 30)
     endif()
     if(Python3_Interpreter_FOUND AND ZGET_BUILD_LARGE_TESTS)
         add_test(NAME integration_100k_entries

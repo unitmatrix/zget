@@ -346,7 +346,7 @@ def main(binary):
 
     # A syntactically successful HTTP exchange is still rejected unless its
     # status, Content-Range, and actual body length describe the requested bytes.
-    for mode in ("ignore", "wrong-range", "truncate"):
+    for mode in ("wrong-range", "truncate"):
         def rejected(base, mode=mode):
             """Require failure for the selected malformed Range response."""
             result = subprocess.run([binary, base + "/archive.zip", "stored.txt"],
