@@ -29,8 +29,8 @@ find_package(ZLIB REQUIRED)
 
 set(ZGET_LIBRARY_SOURCES
     src/zget.c src/error.c src/util.c src/source/source.c
-    src/source/http-parse.c src/source/http.c
-    src/format/format.c src/format/zip/zip.c
+    src/source/http-parse.c src/source/http.c src/source/download.c
+    src/source/file.c src/format/format.c src/format/zip/zip.c
     src/format/zip/zip-parse.c src/format/zip/extract.c)
 
 add_library(libzget SHARED ${ZGET_LIBRARY_SOURCES})
