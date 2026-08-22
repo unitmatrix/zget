@@ -53,16 +53,13 @@ def run(binary):
         url = "http://127.0.0.1:{}/archive.zip".format(server.server_port)
         result = subprocess.run([binary, url, "stored.txt"], check=True,
                                 stdout=subprocess.PIPE,
-                                stderr=subprocess.PIPE,
                                 timeout=10)
         assert result.stdout == b"stored payload"
-        assert result.stderr == b""
     finally:
         # Diagnostic teardown: close the listening socket, but deliberately do
         # not call shutdown() or join() here. The server thread is daemonized,
-        # so process exit will end it. If macOS now reports the subprocess
-        # timeout, zget is the blocker; if the test passes, HTTPServer teardown
-        # was the source of the previous 30-second hang.
+        # so process exit will end it. stderr is inherited on purpose so the
+        # temporary C-level fallback markers appear directly in CI logs.
         server.server_close()
 
 
