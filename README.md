@@ -22,7 +22,9 @@ zget https://example.com/data.zip config.json | jq .
 
 Download the archive for your platform from the
 [latest release](https://github.com/unitmatrix/zget/releases/latest), extract it,
-and put `zget` somewhere on your `$PATH`.
+and put `zget` somewhere on your `$PATH`. Prebuilt binaries use the platform
+libcurl, zlib, TLS, and C runtime libraries, so install the required runtime
+dependencies for your system first.
 
 Linux binaries target Ubuntu 24.04. macOS binaries require macOS 13.2+.
 
@@ -30,15 +32,8 @@ Linux binaries target Ubuntu 24.04. macOS binaries require macOS 13.2+.
 
 Replace `X.Y.Z` with the release version you want to install.
 
-First install the runtime dependencies used by `zget`:
-
 ```sh
 sudo apt install -y libcurl4t64 zlib1g
-```
-
-Then download and install `zget`:
-
-```sh
 curl -fLO https://github.com/unitmatrix/zget/releases/download/vX.Y.Z/zget-X.Y.Z-linux-x86_64.tar.gz
 tar -xzf zget-X.Y.Z-linux-x86_64.tar.gz
 sudo install zget-X.Y.Z-linux-x86_64/zget /usr/local/bin/zget
