@@ -115,9 +115,9 @@ tail -> central directory -> target local header -> target payload
 
 If the server ignores Range requests entirely and returns the complete object,
 zget downloads the archive once into anonymous temporary storage and continues
-through the same local source and ZIP implementation. The operation remains
-transparent to callers, but it necessarily transfers the whole archive and
-therefore loses the bandwidth advantage of Range-based access.
+through the local-file source. The operation remains transparent to callers,
+but it necessarily transfers the whole archive and therefore loses the bandwidth
+advantage of Range-based access.
 
 The first exact Central Directory name match wins. Extraction is streamed
 through STORE or raw-DEFLATE decoding and checked against the entry CRC32.
@@ -328,7 +328,7 @@ the tail as an explicit interval. These extra requests count toward
 
 If a server ignores the required Range request entirely and returns HTTP 200
 with the complete representation, zget falls back to one complete download in
-anonymous temporary storage and continues through the same local-file source. This
+anonymous temporary storage and continues through the local-file source. This
 fallback preserves extraction and listing behavior, but it transfers the entire
 archive and does not provide Range-based bandwidth savings.
 
