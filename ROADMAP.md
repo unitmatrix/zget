@@ -22,18 +22,15 @@ Released in 0.4.0.
 - Preserve normal extraction and listing behavior while documenting that the
   fallback necessarily transfers the complete archive.
 
-## Next
-
 ### Installation and distribution
 
-- Make the path from discovering zget to running it as short as practical.
-- Add a short prerequisite section showing how to install the libraries needed
-  to build and use zget on common Linux distributions and macOS.
-- Keep source-build instructions concise and package-manager oriented, covering
-  libcurl, zlib, and required build tooling.
-- Improve binary/package installation paths, starting with straightforward
-  release binaries and practical package-manager distribution such as Homebrew
-  and an appropriate Linux route.
+- Added concise installation guidance for release binaries.
+- Documented runtime dependencies and current Linux/macOS baselines.
+- Added a concrete Ubuntu 24.04 x86_64 installation example.
+- Keep distribution simple for now: use the existing versioned release archives
+  rather than adding installer scripts, extra release assets, taps, or packages.
+
+## Next
 
 ### Benchmark and prove the value proposition
 
