@@ -49,9 +49,9 @@ rules. Do not duplicate roadmap items or user-facing documentation.
 - When a roadmap item is completed, reprioritized, added, dropped, or otherwise
   changes status, update `docs/roadmap:ROADMAP.md` in the same work session. Do
   not record a roadmap status change only in this context file.
-- When the user says `фиксируй` / `зафиксируй`, persist durable decisions here;
-  update the roadmap too whenever the decision changes roadmap status or
-  priority.
+- `фиксируй`, `зафиксируй`, and `lock this in` mean the same thing: persist
+  durable decisions here; update the roadmap too whenever the decision changes
+  roadmap status or priority.
 - Before tagging a release: docs/readiness review, version bump through
   `VERSION`, green CI, then tag the exact green release commit.
 
