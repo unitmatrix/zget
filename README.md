@@ -18,6 +18,86 @@ zget -1 https://example.com/archive.zip
 zget https://example.com/data.zip config.json | jq .
 ```
 
+## Installation
+
+### Prebuilt CLI
+
+Release archives contain the `zget` executable, its man page, README, and
+license for Linux x86_64/ARM64 and macOS Intel/Apple Silicon. The executable
+contains `libzget` itself; it still uses the platform libcurl, zlib, TLS, and C
+runtime libraries dynamically.
+
+The Linux binaries use Ubuntu 24.04 as their glibc/runtime baseline. On Ubuntu
+24.04, install the runtime libraries with:
+
+```sh
+sudo apt-get update
+sudo apt-get install -y libcurl4t64 zlib1g
+```
+
+The macOS binaries require macOS 13.2 or later so the system libcurl provides
+the APIs used by zget.
+
+Download and install the current release on a supported macOS or Linux machine:
+
+```sh
+release_url=$(curl -fsSLI -o /dev/null -w '%{url_effective}' \
+  https://github.com/unitmatrix/zget/releases/latest)
+tag=${release_url##*/}
+version=${tag#v}
+case "$(uname -s)-$(uname -m)" in
+  Darwin-arm64) platform=macos-arm64 ;;
+  Darwin-x86_64) platform=macos-x86_64 ;;
+  Linux-x86_64) platform=linux-x86_64 ;;
+  Linux-aarch64|Linux-arm64) platform=linux-arm64 ;;
+  *) echo "unsupported platform: $(uname -s)-$(uname -m)" >&2; exit 1 ;;
+esac
+archive="zget-${version}-${platform}.tar.gz"
+curl -fsSLO "https://github.com/unitmatrix/zget/releases/download/${tag}/${archive}"
+tar -xzf "${archive}"
+sudo install -m 0755 "zget-${version}-${platform}/zget" /usr/local/bin/zget
+```
+
+Then try a real remote archive:
+
+```sh
+zget -1 https://github.com/unitmatrix/zget/archive/refs/heads/main.zip | head
+```
+
+### Build from source
+
+Requirements are CMake 3.16+, libcurl 7.85.0+, zlib, and a C99 compiler. Install
+the development prerequisites with the package manager for your platform.
+
+macOS 13.2+ with Homebrew:
+
+```sh
+xcode-select --install
+brew install cmake
+```
+
+Ubuntu 24.04 or Debian 12:
+
+```sh
+sudo apt-get update
+sudo apt-get install -y build-essential cmake pkg-config libcurl4-openssl-dev zlib1g-dev
+```
+
+Fedora 43+:
+
+```sh
+sudo dnf install gcc cmake pkgconf-pkg-config libcurl-devel zlib-ng-compat-devel
+```
+
+Alpine 3.24+:
+
+```sh
+sudo apk add build-base cmake curl-dev zlib-dev
+```
+
+Ubuntu 22.04 ships libcurl 7.81 and therefore does not meet zget's source-build
+requirement without a newer libcurl.
+
 ## Usage
 
 ```text
@@ -117,8 +197,6 @@ and independent testing; it is not a public extension point, registry, or
 dynamic plugin system.
 
 ## Build
-
-Requirements are CMake 3.16+, libcurl 7.85.0+, and zlib.
 
 ```sh
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
