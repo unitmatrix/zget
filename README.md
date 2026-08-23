@@ -48,12 +48,12 @@ zget -1 URL [MEMBER]
 
 ## Familiar by design
 
-Archive operations follow `unzip` where practical, while output conventions
-follow `curl`. `zget URL MEMBER` therefore streams to standard output, while
-`-o FILE` names a local output. Unlike ordinary redirection, named output is
-validated completely before publication and never overwrites an existing path.
-`-l` requests an `unzip`-style listing; the compact `-1` form follows `zipinfo`
-and emits only names.
+Archive operations follow `unzip` where practical, while the output interface
+follows `curl`: `zget URL MEMBER` streams to standard output, while `-o FILE`
+selects a local path. zget deliberately differs from curl's overwrite behavior:
+named output is validated completely before publication and never overwrites an
+existing path. `-l` requests an `unzip`-style listing; the compact `-1` form
+follows `zipinfo` and emits only names.
 
 Extraction requires both a URL and an exact member name. A URL without a member
 is a usage error rather than an implicit request to list the archive; use `-l`
@@ -331,10 +331,6 @@ An inconsistent `Content-Range`, changed object size, non-identity
 redirects cannot downgrade to HTTP. A strong ETag from the first accepted
 response is used for later `If-Match` requests. Without one, consistency is
 best-effort and still checks the object size.
-
-`-o` writes a temporary file in the destination directory and publishes it only
-after decompression and CRC validation. Existing paths are never overwritten.
-Stdout cannot be rolled back if a late error occurs.
 
 ## Scope
 
