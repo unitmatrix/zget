@@ -30,6 +30,29 @@ rules. Do not duplicate roadmap items or user-facing documentation.
 - Back performance claims with reproducible measurements and fair comparisons.
 - Let real-world usage drive hardening instead of speculative features.
 
+## Benchmark decisions
+
+- Run the benchmark in GitHub Actions via a manually triggered workflow so no
+  local benchmark dependencies need to be installed.
+- Benchmark the current released zget binary downloaded from GitHub Releases; do
+  not build zget from source in the benchmark workflow.
+- Compare zget with `remotezip`, `unzip-http`, and a conventional full-download
+  `curl` + `unzip` baseline.
+- Give every tool the same generated ZIP, exact member, and local Range-capable
+  HTTP server so the workload is equivalent.
+- Record transferred bytes, HTTP request count, time to first output byte, total
+  wall time, CPU time, and peak resident memory.
+- Cover targets near the start, middle, and end of the Central Directory, plus a
+  missing member. Start with 100k entries and include the 1m-entry scale case.
+- Keep generated benchmark archives out of the repository.
+- Keep result handling simple: the workflow produces one human-readable
+  `results.md` artifact. Do not add a JSON/CSV/render pipeline unless there is a
+  demonstrated need for it.
+- The benchmark workflow must not modify the repository or automatically open a
+  PR. A permanent `benchmarks/results.md` snapshot is published only by
+  deliberately selecting a benchmark run and committing that result through a
+  normal reviewable change.
+
 ## Authoritative project sources
 
 - Roadmap and product priorities: `ROADMAP.md` on `docs/roadmap`.
@@ -46,9 +69,6 @@ rules. Do not duplicate roadmap items or user-facing documentation.
 - Add focused regression coverage with behavior changes and keep documentation
   synchronized with behavior.
 - Avoid speculative refactors and duplicated sources of truth.
-- Run release benchmarks in GitHub Actions against the current released zget
-  binary downloaded from GitHub Releases; do not build zget from source for that
-  benchmark.
 - When a roadmap item is completed, reprioritized, added, dropped, or otherwise
   changes status, update `docs/roadmap:ROADMAP.md` in the same work session. Do
   not record a roadmap status change only in this context file.
