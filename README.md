@@ -20,11 +20,10 @@ zget https://example.com/data.zip config.json | jq .
 
 ## Installation
 
-Download the archive for your platform from the
+Install the required runtime dependencies (`libcurl` and `zlib`) first. Then
+download the archive for your platform from the
 [latest release](https://github.com/unitmatrix/zget/releases/latest), extract it,
-and put `zget` somewhere on your `$PATH`. Prebuilt binaries use the platform
-libcurl, zlib, TLS, and C runtime libraries, so install the required runtime
-dependencies for your system first.
+and put `zget` somewhere on your `$PATH`.
 
 Linux binaries target Ubuntu 24.04. macOS binaries require macOS 13.2+.
 
@@ -257,7 +256,6 @@ entry, or an exact path to emit only the first match:
 static int print_member(void *userdata, const zget_member_info *member)
 {
     FILE *output = userdata;
-
     if (fwrite(member->name, 1, member->name_length, output) !=
         member->name_length || fputc('\n', output) == EOF)
         return 1;
