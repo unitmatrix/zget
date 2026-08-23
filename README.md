@@ -18,6 +18,26 @@ zget -1 https://example.com/archive.zip
 zget https://example.com/data.zip config.json | jq .
 ```
 
+## Installation
+
+Install the required runtime dependencies (`libcurl` and `zlib`) first. Then
+download the archive for your platform from the
+[latest release](https://github.com/unitmatrix/zget/releases/latest), extract it,
+and put `zget` somewhere on your `$PATH`.
+
+Linux binaries target Ubuntu 24.04. macOS binaries require macOS 13.2+.
+
+### Ubuntu 24.04 x86_64
+
+Replace `X.Y.Z` with the release version you want to install.
+
+```sh
+sudo apt install -y libcurl4t64 zlib1g
+curl -fLO https://github.com/unitmatrix/zget/releases/download/vX.Y.Z/zget-X.Y.Z-linux-x86_64.tar.gz
+tar -xzf zget-X.Y.Z-linux-x86_64.tar.gz
+sudo install zget-X.Y.Z-linux-x86_64/zget /usr/local/bin/zget
+```
+
 ## Usage
 
 ```text
