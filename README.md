@@ -30,8 +30,15 @@ Linux binaries target Ubuntu 24.04. macOS binaries require macOS 13.2+.
 
 Replace `X.Y.Z` with the release version you want to install.
 
+First install the runtime dependencies used by `zget`:
+
 ```sh
 sudo apt install -y libcurl4t64 zlib1g
+```
+
+Then download and install `zget`:
+
+```sh
 curl -fLO https://github.com/unitmatrix/zget/releases/download/vX.Y.Z/zget-X.Y.Z-linux-x86_64.tar.gz
 tar -xzf zget-X.Y.Z-linux-x86_64.tar.gz
 sudo install zget-X.Y.Z-linux-x86_64/zget /usr/local/bin/zget
@@ -321,7 +328,7 @@ the tail as an explicit interval. These extra requests count toward
 
 If a server ignores the required Range request entirely and returns HTTP 200
 with the complete representation, zget falls back to one complete download in
-anonymous temporary storage and continues through the local-file source. This
+anonymous temporary storage and continues through the same local-file source. This
 fallback preserves extraction and listing behavior, but it transfers the entire
 archive and does not provide Range-based bandwidth savings.
 
