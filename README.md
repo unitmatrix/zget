@@ -256,6 +256,7 @@ entry, or an exact path to emit only the first match:
 static int print_member(void *userdata, const zget_member_info *member)
 {
     FILE *output = userdata;
+
     if (fwrite(member->name, 1, member->name_length, output) !=
         member->name_length || fputc('\n', output) == EOF)
         return 1;
