@@ -23,6 +23,25 @@ home elsewhere in the repository.
   configurable fallback download limit were explicitly dropped. Do not
   resurrect them as pending work without a new decision.
 
+## Product direction
+
+- The technical foundation is mature enough that adoption is now constrained
+  more by discoverability, installation friction, and proof of value than by
+  missing core internals.
+- Optimize the path from discovering zget to getting useful results in roughly
+  30 seconds: easy installation, a very clear value proposition, and a concrete
+  example.
+- Back performance claims with reproducible measurements: bytes transferred,
+  latency/time to first result, total time, and memory on representative large
+  archives, with fair comparisons where workloads are equivalent.
+- Treat `--stat`, `--exists`, and machine-readable output as important Unix and
+  automation building blocks, not merely convenience features.
+- Seek real-world usage across large hosted ZIPs, datasets, release/build
+  artifacts, firmware, and CDN/object-storage workloads; use that feedback to
+  drive hardening rather than adding speculative features.
+- Product/adoption priorities belong in the authoritative roadmap, not here;
+  this section records the reasoning behind those priorities.
+
 ## Authoritative project sources
 
 - Roadmap: `ROADMAP.md` on the `docs/roadmap` branch.
