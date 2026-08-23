@@ -195,7 +195,7 @@ cc -o example example.c $(pkg-config --cflags --libs libzget)
 ```
 
 Or use the installed CMake target `Zget::libzget` after
-`find_package(Zget 0.3 REQUIRED)`.
+`find_package(Zget 0.4 REQUIRED)`.
 
 ### Minimal extraction example
 
