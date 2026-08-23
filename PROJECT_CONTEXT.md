@@ -46,6 +46,9 @@ rules. Do not duplicate roadmap items or user-facing documentation.
 - Add focused regression coverage with behavior changes and keep documentation
   synchronized with behavior.
 - Avoid speculative refactors and duplicated sources of truth.
+- Run release benchmarks in GitHub Actions against the current released zget
+  binary downloaded from GitHub Releases; do not build zget from source for that
+  benchmark.
 - When a roadmap item is completed, reprioritized, added, dropped, or otherwise
   changes status, update `docs/roadmap:ROADMAP.md` in the same work session. Do
   not record a roadmap status change only in this context file.
