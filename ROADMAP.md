@@ -24,41 +24,60 @@ Released in 0.4.0.
 
 ## Next
 
+### Installation and distribution
+
+- Make the path from discovering zget to running it as short as practical.
+- Add a short prerequisite section showing how to install the libraries needed
+  to build and use zget on common Linux distributions and macOS.
+- Keep source-build instructions concise and package-manager oriented, covering
+  libcurl, zlib, and required build tooling.
+- Improve binary/package installation paths, starting with straightforward
+  release binaries and practical package-manager distribution such as Homebrew
+  and an appropriate Linux route.
+
+### Benchmark and prove the value proposition
+
+- Add reproducible benchmarks for representative large remote ZIP workloads.
+- Measure transferred bytes, memory use, time to first result, and total time for
+  targets at different positions in the Central Directory.
+- Compare with conventional full-download workflows and similar remote-ZIP tools
+  where workloads are equivalent and the comparison is fair.
+- Use the results to make the README's opening value proposition concrete and
+  measurable: zget should quickly demonstrate why fetching one member from a
+  large remote archive is useful.
+
+### Remote archive queries
+
+- Add an exact-member `--stat` operation.
+- Add a script-friendly `--exists` operation with meaningful exit status.
+- Add machine-readable listing and stat output, with a streaming-friendly format
+  for listings.
+- Add glob filtering for `-l` and `-1` while preserving existing exact-match
+  semantics where they are already part of the public API.
+
 ### Transfer visibility
 
 - Add an interactive progress meter for long downloads and extractions.
 - Keep stdout reserved for requested data; progress belongs on stderr.
 - Avoid interactive progress output when stderr is not a terminal.
 
-### Installation documentation
-
-- Add a short prerequisite section showing how to install the libraries needed
-  to build and use zget on common Linux distributions and macOS.
-- Keep the instructions concise and package-manager oriented, covering libcurl,
-  zlib, and the required build tooling without duplicating full platform setup
-  guides.
-
 ## Planned
 
-### Remote archive queries
+### Real-world adoption and feedback
 
-- Add glob filtering for `-l` and `-1` while preserving existing exact-match
-  semantics where they are already part of the public API.
-- Add an exact-member `--stat` operation.
-- Add a script-friendly `--exists` operation with meaningful exit status.
-- Add machine-readable listing and stat output, with a streaming-friendly format
-  for listings.
+- Exercise zget against real large hosted ZIP workloads such as datasets,
+  release/build artifacts, firmware archives, and object-storage/CDN content.
+- Use field feedback to prioritize compatibility and hardening work instead of
+  speculative features.
 
 ### Robustness and performance
 
 - Expand malformed ZIP/ZIP64 and non-Range fallback coverage.
 - Fuzz new parsing paths as they are introduced.
 - Benchmark archives with hundreds of thousands, millions, and larger entry
-  counts.
-- Measure transferred bytes, memory use, time to first result, and total time;
-  compare with similar remote-ZIP tools where the workloads are equivalent.
+  counts as implementation changes warrant it.
 
-### Distribution
+### Distribution maturity
 
 - Keep upstream builds, installs, metadata, and releases friendly to Linux
   distribution maintainers.
