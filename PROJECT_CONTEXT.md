@@ -53,6 +53,24 @@ rules. Do not duplicate roadmap items or user-facing documentation.
   deliberately selecting a benchmark run and committing that result through a
   normal reviewable change.
 
+## CLI output decisions
+
+- Change ordinary `-o FILE` behavior to match curl-style file output rather than
+  preserving the current atomic no-clobber publication semantics.
+- Stream extracted bytes directly to the requested output path using normal file
+  open semantics. Existing files are truncated/overwritten, and a partial file
+  remains if extraction fails after writing has started.
+- Treat `-o -` as standard output, as curl does.
+- Do not reject existing symlinks, devices, or FIFOs merely because the path
+  exists; opening the requested path should follow normal output-file semantics.
+- Remove the `lstat`/same-directory `mkstemp`/`fsync`/`link` publication path for
+  ordinary `-o` output. The special atomic validated-publication behavior is no
+  longer the default contract.
+- Update the README and `zget(1)` documentation in the same functional PR as the
+  CLI and regression-test changes. Do not land a documentation-only description
+  of the old no-clobber behavior first; the open README clarification PR should
+  be reworked or superseded by the functional change.
+
 ## Authoritative project sources
 
 - Roadmap and product priorities: `ROADMAP.md` on `docs/roadmap`.
