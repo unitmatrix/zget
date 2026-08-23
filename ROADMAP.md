@@ -43,6 +43,16 @@ Released in 0.4.0.
   measurable: zget should quickly demonstrate why fetching one member from a
   large remote archive is useful.
 
+### Curl-compatible file output
+
+- Make ordinary `-o FILE` follow curl-style output semantics: stream directly to
+  the requested path, truncate/overwrite an existing file, and leave partial
+  output when extraction fails after writing has started.
+- Treat `-o -` as standard output.
+- Remove the current atomic no-clobber temporary-file publication path for
+  ordinary `-o` output.
+- Update README, `zget(1)`, and regression coverage in the same functional PR.
+
 ### Remote archive queries
 
 - Add an exact-member `--stat` operation.
