@@ -22,6 +22,15 @@ home elsewhere in the repository.
 - The earlier ideas for a sequential non-Range parser, `--range-only`, and a
   configurable fallback download limit were explicitly dropped. Do not
   resurrect them as pending work without a new decision.
+- Installation guidance is now on `main` via merged PR #31. It keeps the general
+  path short: install runtime dependencies first, then download the release
+  archive, extract it, and place `zget` on `PATH`; the concrete copy-paste
+  example is Ubuntu 24.04 x86_64 and uses an `X.Y.Z` version placeholder.
+- For distribution, keep the current versioned release tarballs for now. Do not
+  add installer scripts, new release asset variants/aliases, Homebrew tap repos,
+  or distro packages unless that decision is explicitly revisited.
+- Immediate next product work is reproducible benchmarking. Do not start
+  `--stat` before that benchmark step is completed or reprioritized.
 
 ## Product direction
 
