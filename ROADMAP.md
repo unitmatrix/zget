@@ -45,8 +45,26 @@ Released in 0.4.0.
 
 ## Next
 
+### Whole-resource retrieval
+
+- Reframe zget as an archive-aware file getter: retrieve a complete HTTP(S)
+  resource, or select one file inside a supported remote container.
+- Accept `zget [-o FILE] URL [MEMBER]`; when `MEMBER` is omitted, stream a
+  direct complete GET without attempting archive parsing.
+- Extend `zget_get()` so a NULL member streams the complete resource, a
+  nonempty member preserves selective archive extraction, and an empty member
+  remains invalid. Keep the context/listing APIs archive-oriented.
+- Generalize the existing private complete-download implementation around a
+  callback sink shared by anonymous fallback storage and direct CLI output.
+- Preserve HTTP/status/redirect security and partial-output behavior while
+  keeping the feature intentionally smaller than a general curl replacement.
+- Update the CLI, public API documentation, README, `zget(1)`, and focused
+  regression coverage together. Target the semantic extension for 0.6.0.
+
 ### Benchmark and prove the value proposition
 
+- Keep benchmark execution deferred until it is explicitly resumed; the agreed
+  benchmark design remains unchanged.
 - Add reproducible benchmarks for representative large remote ZIP workloads.
 - Measure transferred bytes, memory use, time to first result, and total time for
   targets at different positions in the Central Directory.
