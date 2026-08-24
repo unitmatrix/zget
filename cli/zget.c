@@ -5,10 +5,7 @@
 #include <signal.h>
 #include <stdint.h>
 #include <stdio.h>
-#include <stdlib.h>
 #include <string.h>
-#include <sys/stat.h>
-#include <unistd.h>
 
 struct file_output {
     FILE *file;
@@ -129,32 +126,14 @@ static void usage(FILE *file)
                   "       zget -1 URL [MEMBER]\n");
 }
 
-static char *temporary_name(const char *path)
-{
-    /* Same-directory placement keeps final publication on one filesystem. */
-    const char *slash = strrchr(path, '/');
-    const char *base = slash == NULL ? path : slash + 1;
-    size_t dir_len = slash == NULL ? 0 : (size_t)(slash - path + 1);
-    size_t n = dir_len + 1 + strlen(base) + sizeof(".zget.tmp.XXXXXX");
-    char *name = malloc(n);
-    if (name == NULL)
-        return NULL;
-    if (dir_len != 0)
-        memcpy(name, path, dir_len);
-    (void)snprintf(name + dir_len, n - dir_len, ".%s.zget.tmp.XXXXXX", base);
-    return name;
-}
-
 int main(int argc, char **argv)
 {
     const char *output_path = NULL, *url, *member = NULL;
-    char *temp_path = NULL;
-    struct stat st;
     struct file_output output = {stdout, 0};
     struct list_output listing = {{stdout, 0}, 0, 0, 0, 0};
     zget_ctx *ctx = NULL;
     zget_options options;
-    int arg = 1, fd = -1, list_mode = 0, rc, exit_status = 1;
+    int arg = 1, close_output = 0, list_mode = 0, rc, exit_status = 1;
 
     if (argc == 2 && !strcmp(argv[1], "--version")) {
         printf("zget %s\n", zget_version());
@@ -261,33 +240,13 @@ int main(int argc, char **argv)
         goto done;
     }
 
-    if (output_path != NULL) {
-        /*
-         * Never stream into the destination itself: decompression or CRC may
-         * fail after substantial output. mkstemp gives this invocation unique,
-         * private scratch storage which every failure path removes below.
-         */
-        if (lstat(output_path, &st) == 0) {
-            fprintf(stderr, "zget: output already exists: %s\n", output_path);
-            goto done;
-        }
-        if (errno != ENOENT) {
-            fprintf(stderr, "zget: cannot inspect output: %s\n", strerror(errno));
-            goto done;
-        }
-        temp_path = temporary_name(output_path);
-        if (temp_path == NULL || (fd = mkstemp(temp_path)) < 0) {
-            fprintf(stderr, "zget: cannot create temporary output: %s\n", strerror(errno));
-            goto done;
-        }
-        output.file = fdopen(fd, "wb");
+    if (output_path != NULL && strcmp(output_path, "-") != 0) {
+        output.file = fopen(output_path, "wb");
         if (output.file == NULL) {
-            fprintf(stderr, "zget: cannot open temporary output: %s\n", strerror(errno));
-            close(fd);
-            fd = -1;
+            fprintf(stderr, "zget: cannot open output: %s\n", strerror(errno));
             goto done;
         }
-        fd = -1;
+        close_output = 1;
     }
 
     /* Keep ZIP-specific lookup details behind libzget's format-neutral API. */
@@ -297,26 +256,20 @@ int main(int argc, char **argv)
             goto done;
         goto zget_failure;
     }
-    /* Publish only after library validation and durable file contents succeed. */
-    if (fflush(output.file) != 0 || (output_path != NULL && fsync(fileno(output.file)) != 0)) {
+    if (fflush(output.file) != 0) {
         if (errno == EPIPE)
             goto done;
         fprintf(stderr, "zget: cannot flush output: %s\n", strerror(errno));
         goto done;
     }
-    if (output_path != NULL) {
+    if (close_output) {
         if (fclose(output.file) != 0) {
             output.file = NULL;
             fprintf(stderr, "zget: cannot close output: %s\n", strerror(errno));
             goto done;
         }
         output.file = NULL;
-        /* link(2) publishes atomically and cannot overwrite an existing path. */
-        if (link(temp_path, output_path) != 0) {
-            fprintf(stderr, "zget: cannot publish output: %s\n", strerror(errno));
-            goto done;
-        }
-        (void)unlink(temp_path);
+        close_output = 0;
     }
     exit_status = 0;
     goto done;
@@ -326,15 +279,9 @@ zget_failure:
             ctx != NULL && zget_last_error_message(ctx)[0] != '\0' ? ": " : "",
             ctx != NULL ? zget_last_error_message(ctx) : "");
 done:
-    /* stdout is borrowed; only a stream opened for -o is owned and closed here. */
-    if (output_path != NULL && output.file != NULL)
+    /* stdout is borrowed; only a stream opened for named output is owned. */
+    if (close_output && output.file != NULL)
         (void)fclose(output.file);
-    if (fd >= 0)
-        (void)close(fd);
-    if (temp_path != NULL) {
-        (void)unlink(temp_path);
-        free(temp_path);
-    }
     zget_close(ctx);
     zget_global_cleanup();
     return exit_status;

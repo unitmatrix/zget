@@ -45,9 +45,11 @@ are required; a URL by itself does not request an archive listing.
 .PP
 By default, member data is written to standard output. When
 .B \-o
-is used, output is first written to a temporary file in the destination
-directory. The destination is published only after extraction and CRC
-validation succeed, and an existing path is never overwritten.
+is used with a file name, that path is opened normally and member data is
+streamed directly to it. An existing regular file is truncated. If extraction
+fails after writing begins, partial output remains. The special file name
+.B \-
+selects standard output.
 .PP
 .B \-l
 streams a listing directly from the Central Directory. Each output row contains
@@ -69,7 +71,12 @@ listing. This form follows the convention established by
 .BI \-o " FILE"
 Write the member to
 .I FILE
-instead of standard output.
+instead of standard output. Existing files are overwritten using normal
+file-open semantics; a
+.I FILE
+of
+.B \-
+selects standard output.
 .TP
 .B \-l
 List archive members to standard output. With
@@ -121,7 +128,7 @@ Write a member to standard output:
 zget https://example.com/archive.zip README.txt
 .fi
 .PP
-Publish a validated member as a local file:
+Write a member to a local file:
 .PP
 .nf
 zget -o report.pdf https://example.com/documents.zip path/to/report.pdf

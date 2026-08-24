@@ -50,8 +50,9 @@ zget -1 URL [MEMBER]
 
 Archive operations follow `unzip` where practical, while output conventions
 follow `curl`. `zget URL MEMBER` therefore streams to standard output, while
-`-o FILE` names a local output. Unlike ordinary redirection, named output is
-validated completely before publication and never overwrites an existing path.
+`-o FILE` streams directly to a local output using normal file-open semantics:
+an existing file is truncated and overwritten, and `-o -` selects standard
+output.
 `-l` requests an `unzip`-style listing; the compact `-1` form follows `zipinfo`
 and emits only names.
 
@@ -244,7 +245,8 @@ The output callback borrows each buffer only for that callback invocation.
 Extraction may emit data before a later decompression, size, or CRC failure, so
 only a `ZGET_OK` return guarantees complete validated output. Applications that
 need atomic publication should stream to temporary storage and publish it only
-after success, as the CLI does for `-o`.
+after success. The CLI deliberately gives `-o` ordinary curl-style streaming
+semantics instead.
 
 ### Listing
 
@@ -332,9 +334,11 @@ redirects cannot downgrade to HTTP. A strong ETag from the first accepted
 response is used for later `If-Match` requests. Without one, consistency is
 best-effort and still checks the object size.
 
-`-o` writes a temporary file in the destination directory and publishes it only
-after decompression and CRC validation. Existing paths are never overwritten.
-Stdout cannot be rolled back if a late error occurs.
+`-o FILE` opens the requested path normally and streams member data into it.
+Existing regular files are truncated, and paths such as symlinks, FIFOs, and
+devices follow the platform's normal open behavior. If extraction fails after
+writing begins, the partial output remains. `-o -` and the default output both
+write to stdout, which likewise cannot be rolled back after a late error.
 
 ## Scope
 

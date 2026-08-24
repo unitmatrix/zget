@@ -294,7 +294,7 @@ def main(binary):
     assert run_server(empty_archive(), "normal", empty_listing) == 2
 
     def normal(base):
-        """Cover codecs, redirects, varied names, and safe file publication."""
+        """Cover codecs, redirects, varied names, and file output semantics."""
         got = subprocess.run([binary, base + "/archive.zip", "stored.txt"],
                              check=True, stdout=subprocess.PIPE).stdout
         assert got == b"stored payload"
@@ -312,12 +312,51 @@ def main(binary):
         assert got == b"long"
         with tempfile.TemporaryDirectory() as d:
             path = os.path.join(d, "out")
+            with open(path, "wb") as stream:
+                stream.write(b"old content that must be truncated")
             subprocess.run([binary, "-o", path, base + "/archive.zip", "stored.txt"],
                            check=True)
-            assert open(path, "rb").read() == b"stored payload"
-            again = subprocess.run(
-                [binary, "-o", path, base + "/archive.zip", "stored.txt"])
-            assert again.returncode != 0
+            with open(path, "rb") as stream:
+                assert stream.read() == b"stored payload"
+
+            dash = subprocess.run(
+                [binary, "-o", "-", base + "/archive.zip", "stored.txt"],
+                cwd=d, check=True, stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE)
+            assert dash.stdout == b"stored payload"
+            assert not os.path.exists(os.path.join(d, "-"))
+
+            target = os.path.join(d, "target")
+            link = os.path.join(d, "link")
+            with open(target, "wb") as stream:
+                stream.write(b"old symlink target")
+            os.symlink(target, link)
+            subprocess.run(
+                [binary, "-o", link, base + "/archive.zip", "stored.txt"],
+                check=True)
+            assert os.path.islink(link)
+            with open(target, "rb") as stream:
+                assert stream.read() == b"stored payload"
+
+            fifo = os.path.join(d, "fifo")
+            os.mkfifo(fifo)
+            fifo_fd = os.open(fifo, os.O_RDWR)
+            try:
+                process = subprocess.Popen(
+                    [binary, "-o", fifo, base + "/archive.zip", "stored.txt"],
+                    stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                stdout, stderr = process.communicate(timeout=10)
+                assert process.returncode == 0, stderr
+                assert stdout == b""
+                assert os.read(fifo_fd, 1024) == b"stored payload"
+            finally:
+                os.close(fifo_fd)
+
+            rejected = subprocess.run(
+                [binary, "-o", d, base + "/archive.zip", "stored.txt"],
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            assert rejected.returncode != 0
+            assert b"cannot open output" in rejected.stderr
     run_server(data, "normal", normal)
 
     def broken_pipe(base):
@@ -414,6 +453,22 @@ def main(binary):
     # the intended unsupported-method or encryption check.
     bad_crc = mutate(data, cd + 16, b"\x00\x00\x00\x00")
     expect_failure(bad_crc)
+
+    def late_named_output_failure(base):
+        """Retain bytes written to named output before a late CRC failure."""
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "out")
+            with open(path, "wb") as stream:
+                stream.write(b"old content")
+            result = subprocess.run(
+                [binary, "-o", path, base + "/archive.zip", "stored.txt"],
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            assert result.returncode != 0
+            assert result.stdout == b""
+            with open(path, "rb") as stream:
+                assert stream.read() == b"stored payload"
+    run_server(bad_crc, "normal", late_named_output_failure)
+
     unsupported = mutate(mutate(data, cd + 10, (99).to_bytes(2, "little")),
                          local + 8, (99).to_bytes(2, "little"))
     expect_failure(unsupported)
