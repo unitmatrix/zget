@@ -1,4 +1,4 @@
-.TH ZGET 1 "August 22, 2026" "zget @PROJECT_VERSION@" "User Commands"
+.TH ZGET 1 "August 24, 2026" "zget @PROJECT_VERSION@" "User Commands"
 .SH NAME
 zget \- fetch one member from a remote ZIP archive
 .SH SYNOPSIS
