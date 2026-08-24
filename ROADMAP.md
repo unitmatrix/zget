@@ -10,6 +10,19 @@ same local source and archive implementation.
 
 ## Recently completed
 
+### Curl-compatible file output
+
+Released in 0.5.0.
+
+- Ordinary `-o FILE` streams directly to the requested path, truncating and
+  overwriting existing regular files through normal file-open semantics.
+- `-o -` selects standard output.
+- Symlinks, FIFOs, devices, and other special paths follow normal platform open
+  behavior instead of being rejected solely because the path exists.
+- If extraction fails after writing begins, partial named output remains.
+- README, `zget(1)`, and regression coverage describe and enforce the same
+  contract.
+
 ### Graceful non-Range fallback
 
 Released in 0.4.0.
@@ -42,16 +55,6 @@ Released in 0.4.0.
 - Use the results to make the README's opening value proposition concrete and
   measurable: zget should quickly demonstrate why fetching one member from a
   large remote archive is useful.
-
-### Curl-compatible file output
-
-- Make ordinary `-o FILE` follow curl-style output semantics: stream directly to
-  the requested path, truncate/overwrite an existing file, and leave partial
-  output when extraction fails after writing has started.
-- Treat `-o -` as standard output.
-- Remove the current atomic no-clobber temporary-file publication path for
-  ordinary `-o` output.
-- Update README, `zget(1)`, and regression coverage in the same functional PR.
 
 ### Remote archive queries
 
