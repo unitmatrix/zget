@@ -30,6 +30,36 @@ rules. Do not duplicate roadmap items or user-facing documentation.
 - Back performance claims with reproducible measurements and fair comparisons.
 - Let real-world usage drive hardening instead of speculative features.
 
+## Resource getter decisions
+
+- Position zget as an archive-aware file getter: get a complete HTTP(S)
+  resource, or get one selected file inside a supported remote container.
+- Change the CLI synopsis to `zget [-o FILE] URL [MEMBER]`. With no `MEMBER`,
+  stream the complete representation directly without archive parsing. With a
+  `MEMBER`, retain the current selective Range path and safe full-download
+  fallback.
+- Give the public one-shot `zget_get()` call the same optional-selector
+  contract: a NULL member streams the complete resource, a nonempty member
+  selects that archive member, and an empty string remains invalid.
+- Keep the reusable context API archive-oriented. `zget_open_url()` continues to
+  open a supported archive, `zget_extract_member(ctx, NULL, ...)` remains
+  invalid, and `zget_list(ctx, NULL, ...)` continues to list every member.
+- Treat the `zget_get(NULL member)` behavior as a compatible input-domain
+  expansion but a deliberate semantic API change. Do not change its signature,
+  public structs, or result-code ABI. Ship the new contract in 0.6.0, whose
+  normal pre-1.0 version policy also establishes the 0.6 shared-library line.
+- Reuse one private callback-based complete-HTTP-transfer primitive. Adapt it to
+  anonymous temporary storage for archive fallback and directly to the CLI
+  output sink for whole-resource retrieval; do not expose a separate generic
+  download API merely to share the implementation.
+- Keep whole-resource retrieval deliberately narrow: HTTP(S) GET, existing
+  redirect and transport security policy, stdout or explicit `-o`, and existing
+  partial-output semantics. Do not grow zget into a general curl replacement or
+  infer output filenames automatically.
+- Describe ZIP as the first supported container rather than the product
+  identity. Add formats only when selective remote access offers a demonstrated
+  advantage; do not add a speculative format/plugin framework.
+
 ## Benchmark decisions
 
 - Run the benchmark in GitHub Actions via a manually triggered workflow so no
