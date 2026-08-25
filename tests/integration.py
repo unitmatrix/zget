@@ -205,6 +205,7 @@ def main(binary):
 
     # Syntax failures must remain local and use the conventional usage status.
     for arguments in ([], ["only-a-url"], ["-o"], ["-o", ""], ["-l"], ["-1"],
+                      ["-l", "url", "member"], ["-1", "url", "member"],
                       ["-l", "url", "member", "extra"],
                       ["-1", "url", "member", "extra"]):
         result = subprocess.run([binary, *arguments], stdout=subprocess.PIPE,
@@ -286,39 +287,13 @@ def main(binary):
     # One rejected suffix, one size probe, one exact tail, and one CD request.
     assert run_server(data, "suffix-unsupported", suffix_fallback) == 4
 
-    def specific_listing(base):
-        """An exact listing emits one row and stops at the first name match."""
-        url = base + "/archive.zip"
-        result = subprocess.run([binary, "-l", url, "stored.txt"],
-                                check=True, stdout=subprocess.PIPE)
-        lines = result.stdout.splitlines()
-        assert lines[2].endswith(b"   stored.txt")
-        assert lines[2].startswith(f"{14:9d}  ".encode())
-        assert lines[-1] == f"{14:9d}                     1 file".encode()
-        assert len(lines) == 5
-        short = subprocess.run([binary, "-1", url, "stored.txt"],
-                               check=True, stdout=subprocess.PIPE)
-        assert short.stdout == b"stored.txt\n"
-        missing = subprocess.run([binary, "-l", url, "missing"],
-                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        assert missing.returncode != 0
-        assert b"member not found" in missing.stderr
-        short_missing = subprocess.run([binary, "-1", url, "missing"],
-                                       stdout=subprocess.PIPE,
-                                       stderr=subprocess.PIPE)
-        assert short_missing.returncode != 0
-        assert short_missing.stdout == b""
-        assert b"member not found" in short_missing.stderr
-    assert run_server(data, "normal", specific_listing) == 8
-
     stored_cd = central_entry(data, "stored.txt")
     invalid_date = mutate(data, stored_cd + 14, b"\x00\x00")
 
     def invalid_timestamp_listing(base):
         """Reject an entry when no valid modification-time source exists."""
-        result = subprocess.run(
-            [binary, "-l", base + "/archive.zip", "stored.txt"],
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        result = subprocess.run([binary, "-l", base + "/archive.zip"],
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         assert result.returncode != 0
     run_server(invalid_date, "normal", invalid_timestamp_listing)
 
@@ -550,10 +525,6 @@ def main(binary):
         result = subprocess.run([binary, base + "/archive.zip", "same"],
                                 check=True, stdout=subprocess.PIPE)
         assert result.stdout == b"first"
-        result = subprocess.run([binary, "-l", base + "/archive.zip", "same"],
-                                check=True, stdout=subprocess.PIPE)
-        assert f"{5:9d}  ".encode() in result.stdout
-        assert result.stdout.endswith(f"{5:9d}                     1 file\n".encode())
     run_server(duplicates.getvalue(), "normal", duplicate)
 
     unicode_cd = central_entry(data, "unicod\u00e9.txt")

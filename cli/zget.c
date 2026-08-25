@@ -14,12 +14,10 @@ struct file_output {
 
 struct list_output {
     struct file_output stream;
-    const char *member;
     uint64_t entries;
     uint64_t total_size;
     int total_overflow;
     int names_only;
-    int found;
     int header_written;
 };
 
@@ -138,12 +136,6 @@ static int list_member(void *opaque, const zget_member_info *member)
     char prefix[64];
     int length;
 
-    if (out->member != NULL &&
-        (out->found || strcmp(out->member, member->name) != 0))
-        return 0;
-    if (out->member != NULL)
-        out->found = 1;
-
     /*
      * The short form deliberately shares the normal name encoder. Besides
      * making one-name-per-line output pleasant for scripts, this prevents a
@@ -181,15 +173,15 @@ static int list_member(void *opaque, const zget_member_info *member)
 static void usage(FILE *file)
 {
     fprintf(file, "usage: zget [-o FILE] URL MEMBER\n"
-                  "       zget -l URL [MEMBER]\n"
-                  "       zget -1 URL [MEMBER]\n");
+                  "       zget -l URL\n"
+                  "       zget -1 URL\n");
 }
 
 int main(int argc, char **argv)
 {
     const char *output_path = NULL, *url, *member = NULL;
     struct file_output output = {stdout, 0};
-    struct list_output listing = {{stdout, 0}, NULL, 0, 0, 0, 0, 0, 0};
+    struct list_output listing = {{stdout, 0}, 0, 0, 0, 0, 0};
     int arg = 1, close_output = 0, list_mode = 0, rc, exit_status = 1;
 
     if (argc == 2 && !strcmp(argv[1], "--version")) {
@@ -212,13 +204,13 @@ int main(int argc, char **argv)
         }
         output_path = argv[arg++];
     }
-    if ((list_mode && (argc - arg < 1 || argc - arg > 2)) ||
+    if ((list_mode && argc - arg != 1) ||
         (!list_mode && argc - arg != 2)) {
         usage(stderr);
         return 2;
     }
     url = argv[arg];
-    if (!list_mode || argc - arg == 2)
+    if (!list_mode)
         member = argv[arg + 1];
     if (member != NULL && member[0] == '\0') {
         fprintf(stderr, "zget: member path must not be empty\n");
@@ -243,15 +235,10 @@ int main(int argc, char **argv)
         char summary[96];
         int length;
 
-        listing.member = member;
         rc = zget_list(url, list_member, &listing);
         if (rc != ZGET_OK) {
             if (listing.stream.broken_pipe)
                 goto done;
-            goto zget_failure;
-        }
-        if (member != NULL && !listing.found) {
-            rc = ZGET_ENOTFOUND;
             goto zget_failure;
         }
         if (!listing.names_only) {

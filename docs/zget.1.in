@@ -10,12 +10,10 @@ zget \- fetch one member from a remote ZIP archive
 .B zget
 .B \-l
 .I URL
-.RI [ MEMBER ]
 .br
 .B zget
 .B \-1
 .I URL
-.RI [ MEMBER ]
 .br
 .B zget
 .RB [ \-h | \-\-help ]
@@ -50,9 +48,9 @@ fails after writing begins, partial output remains. The special file name
 selects standard output.
 .PP
 .B \-l
-streams a listing directly from the Central Directory. Each output row contains
-the uncompressed length, UTC modification date and time, and member name
-in a layout inspired by
+streams the complete archive listing directly from the Central Directory. Each
+output row contains the uncompressed length, UTC modification date and time, and
+member name in a layout inspired by
 .BR unzip (1).
 Timestamps are resolved from NTFS, Extended Timestamp, or packed DOS metadata
 in that order. Control characters and backslashes are escaped so an
@@ -60,7 +58,7 @@ archive name cannot create additional terminal lines. Listing memory use is
 independent of the entry count.
 .PP
 .B \-1
-uses the same streaming lookup but writes only member names, one per line,
+uses the same streaming listing but writes only member names, one per line,
 without a header or totals. Names receive the same safe escaping as the table
 listing. This form follows the convention established by
 .BR zipinfo (1).
@@ -77,15 +75,11 @@ of
 selects standard output.
 .TP
 .B \-l
-List archive members to standard output. With
-.IR MEMBER ,
-emit only the first exact match; otherwise emit every member. A URL without
-this explicit option does not imply listing.
+List all archive members to standard output. A URL without this explicit option
+does not imply listing.
 .TP
 .B \-1
-List only archive member names, one per line. With
-.IR MEMBER ,
-emit only the first exact match; otherwise emit every member.
+List all archive member names, one per line.
 .TP
 .BR \-h , " " \-\-help
 Show command usage and exit.
@@ -142,12 +136,6 @@ Stream the archive listing:
 .PP
 .nf
 zget -l https://example.com/archive.zip
-.fi
-.PP
-List one exact member without extracting it:
-.PP
-.nf
-zget -l https://example.com/documents.zip path/to/report.pdf
 .fi
 .PP
 List only member names:
