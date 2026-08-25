@@ -31,7 +31,7 @@ rules. Do not duplicate roadmap items or user-facing documentation.
   member lookup and extraction rather than expanding it into a general HTTP or
   archive API.
 - The CLI remains a thin frontend over that library. Existing `-l` / `-1`
-  listing support may remain as small navigation functionality, but should not
+  listing support remains as small navigation functionality, but should not
   drive speculative query APIs or broader archive-manager scope.
 - `zget URL MEMBER` is a selective operation. It must use remote byte-range
   access; if the server cannot provide the required ranges, fail instead of
@@ -43,6 +43,38 @@ rules. Do not duplicate roadmap items or user-facing documentation.
 - Prefer real user demand over speculative CLI features or abstractions.
 - Optimize discover-to-useful-result time to roughly 30 seconds and back the
   value proposition with reproducible measurements.
+
+## Public API decisions
+
+- Minimize the public library surface around two one-shot streaming operations:
+  `zget_get(url, member, write_cb, userdata)` for extraction and
+  `zget_list(url, list_cb, userdata)` for listing.
+- Keep `zget_write_cb` with opaque `userdata`; extraction remains push-based and
+  streaming so callers can write to files, memory, sockets, hashes, parsers, or
+  other sinks without buffering the complete member.
+- Remove public `zget_options`, `zget_options_init()`, process-wide
+  `zget_global_init()` / `zget_global_cleanup()`, `zget_ctx`, and the public
+  open/extract/close context API. Their implementation concerns should stay
+  internal unless real usage later demonstrates a need for public control.
+- Remove `zget_last_error_message()` with the context API. Keep
+  `zget_error_string()` for human-readable result text and `zget_version()` for
+  runtime version reporting.
+- Keep only public error codes that can actually be returned by `zget_get()` or
+  `zget_list()` after the API simplification; remove unreachable/internal-only
+  public result codes such as `ZGET_ENOTINITIALIZED` once global init is
+  internalized.
+- `zget_list()` lists the whole archive only. Do not give it an optional member
+  selector; exact member extraction belongs to `zget_get()`.
+- Listing metadata should expose useful ZIP Central Directory fields without
+  inventing higher-level interpretations: raw name bytes plus `name_length`, raw
+  general-purpose `flags`, raw DOS `modified_time` and `modified_date`, resolved
+  `compressed_size` and `uncompressed_size`, `crc32`, and `compression_method`.
+- Do not expose derived `ZGET_MEMBER_NAME_UTF8` /
+  `ZGET_MEMBER_HAS_MODIFIED_TIME` flags or decomposed calendar fields in the
+  public metadata structure. The CLI may interpret raw metadata for display.
+- Do not add `external_attributes` to the public API without a demonstrated use
+  case. If needed later, prefer exposing the raw ZIP field before adding
+  platform-specific interpretation.
 
 ## HTTP Range decisions
 
@@ -116,9 +148,11 @@ rules. Do not duplicate roadmap items or user-facing documentation.
 - When a roadmap item is completed, reprioritized, added, dropped, or otherwise
   changes status, update `docs/roadmap:ROADMAP.md` in the same work session. Do
   not record a roadmap status change only in this context file.
-- `фиксируй`, `зафиксируй`, and `lock this in` mean the same thing: persist
-  durable decisions here; update the roadmap too whenever the decision changes
-  roadmap status or priority.
+- `фиксируй`, `зафиксируй`, and `lock this in` mean the same thing. Before
+  persisting anything, first show a short list of the proposed durable decisions
+  and wait for confirmation or correction. After confirmation, persist them
+  here; update the roadmap too whenever the decision changes roadmap status or
+  priority.
 - Before tagging a release: docs/readiness review, version bump through
   `VERSION`, green CI, then tag the exact green release commit.
 
