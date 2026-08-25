@@ -66,10 +66,14 @@ Released in 0.4.0, but no longer aligned with the current minimal product goal.
 - Simplify listing to whole-archive enumeration only, without an optional exact
   member selector.
 - Make public listing metadata reflect useful Central Directory data at its
-  semantic type: name bytes + length, ZIP flags, separate `zget_date` and
-  `zget_time` modification values, compressed/uncompressed sizes, CRC32, and
-  compression method. Do not expose packed DOS date/time words or invent
-  timezone/DST/weekday semantics.
+  semantic type: NUL-terminated `const char *name` plus authoritative byte
+  length, ZIP flags, separate `zget_date` and `zget_time` modification values,
+  compressed/uncompressed sizes, CRC32, and compression method.
+- Do not convert or guess filename encoding; the terminator is C API convenience
+  and is not included in `name_length`.
+- Remove `struct_size` / `ZGET_MEMBER_INFO_V1_SIZE` from member metadata.
+- Do not expose packed DOS date/time words or invent timezone/DST/weekday
+  semantics; directly decode their defined calendar components.
 - Avoid derived metadata flags such as library-invented UTF-8/time-presence
   flags when the underlying ZIP metadata already carries the relevant facts.
 - Do not expose external attributes unless a real use case appears.
