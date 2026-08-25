@@ -76,6 +76,16 @@ Completed on main after 0.5.0 for the next minor release.
 
 ## Deferred
 
+### Exact member metadata lookup
+
+- Consider an optional exact-member filter for `zget_list()` if a real need
+  appears to inspect one member's metadata without downloading its payload.
+- Reuse the existing streaming Central Directory parser so an exact match can
+  stop the scan early rather than filtering after a complete listing.
+- Prefer this over introducing separate `zget_stat()` or `zget_exists()` APIs.
+- Do not add it to the current release solely for completeness; revisit when a
+  concrete use case justifies the extra API behavior.
+
 ### Benchmark and prove the value proposition
 
 - Keep benchmark execution deferred until it is explicitly resumed; the agreed
