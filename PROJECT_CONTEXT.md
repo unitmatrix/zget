@@ -13,52 +13,31 @@ rules. Do not duplicate roadmap items or user-facing documentation.
 - Latest release: `0.5.0`.
 - `VERSION` is the single source of truth for the project version. Do not add
   manually synchronized version literals to tests or build plumbing.
-- HTTP Range is the preferred efficient path, not a hard requirement.
-- Since 0.4.0, if a server ignores a required Range request and returns the
-  complete representation, zget safely spools the complete archive to anonymous
-  temporary storage and continues through the normal local-file source.
+- Release 0.5.0 still contains the transparent complete-download fallback added
+  in 0.4.0 when a server ignores required Range requests. The current product
+  direction is to remove that fallback and return to a strict selective-access
+  contract.
 - The earlier ideas for a sequential non-Range parser, `--range-only`, and a
   configurable fallback download limit were explicitly dropped. Do not
   resurrect them without a new decision.
 
 ## Product direction
 
-- The technical foundation is mature enough that adoption is constrained more by
-  discoverability, installation friction, and proof of value than by missing
-  core internals.
-- Optimize discover-to-useful-result time to roughly 30 seconds.
-- Back performance claims with reproducible measurements and fair comparisons.
-- Let real-world usage drive hardening instead of speculative features.
-
-## Resource getter decisions
-
-- Position zget as an archive-aware file getter: get a complete HTTP(S)
-  resource, or get one selected file inside a supported remote container.
-- Change the CLI synopsis to `zget [-o FILE] URL [MEMBER]`. With no `MEMBER`,
-  stream the complete representation directly without archive parsing. With a
-  `MEMBER`, retain the current selective Range path and safe full-download
-  fallback.
-- Give the public one-shot `zget_get()` call the same optional-selector
-  contract: a NULL member streams the complete resource, a nonempty member
-  selects that archive member, and an empty string remains invalid.
-- Keep the reusable context API archive-oriented. `zget_open_url()` continues to
-  open a supported archive, `zget_extract_member(ctx, NULL, ...)` remains
-  invalid, and `zget_list(ctx, NULL, ...)` continues to list every member.
-- Treat the `zget_get(NULL member)` behavior as a compatible input-domain
-  expansion but a deliberate semantic API change. Do not change its signature,
-  public structs, or result-code ABI. Ship the new contract in 0.6.0, whose
-  normal pre-1.0 version policy also establishes the 0.6 shared-library line.
-- Reuse one private callback-based complete-HTTP-transfer primitive. Adapt it to
-  anonymous temporary storage for archive fallback and directly to the CLI
-  output sink for whole-resource retrieval; do not expose a separate generic
-  download API merely to share the implementation.
-- Keep whole-resource retrieval deliberately narrow: HTTP(S) GET, existing
-  redirect and transport security policy, stdout or explicit `-o`, and existing
-  partial-output semantics. Do not grow zget into a general curl replacement or
-  infer output filenames automatically.
-- Describe ZIP as the first supported container rather than the product
-  identity. Add formats only when selective remote access offers a demonstrated
-  advantage; do not add a speculative format/plugin framework.
+- zget has one primary job: fetch only the requested member from a remote
+  archive. Keep the product and implementation as small as practical around
+  that goal.
+- `zget URL MEMBER` is a selective operation. It must use remote byte-range
+  access; if the server cannot provide the required ranges, fail instead of
+  silently downloading the complete archive.
+- Do not add whole-resource retrieval (`zget URL`). curl already serves that
+  purpose; zget should remain differentiated by archive-member selection.
+- Do not add flags merely to recover the selective contract, such as
+  `--range-only` or `--no-fallback`. Supplying `MEMBER` already expresses it.
+- Keep existing listing forms only as small supporting functionality; do not
+  grow zget into a general archive manager.
+- Prefer real user demand over speculative CLI features or abstractions.
+- Optimize discover-to-useful-result time to roughly 30 seconds and back the
+  value proposition with reproducible measurements.
 
 ## Benchmark decisions
 
