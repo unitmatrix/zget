@@ -26,6 +26,13 @@ rules. Do not duplicate roadmap items or user-facing documentation.
 - zget has one primary job: fetch only the requested member from a remote
   archive. Keep the product and implementation as small as practical around
   that goal.
+- `libzget` is a standalone public library, not merely an implementation detail
+  of the CLI. Keep its public functionality minimal around selective remote ZIP
+  member lookup and extraction rather than expanding it into a general HTTP or
+  archive API.
+- The CLI remains a thin frontend over that library. Existing `-l` / `-1`
+  listing support may remain as small navigation functionality, but should not
+  drive speculative query APIs or broader archive-manager scope.
 - `zget URL MEMBER` is a selective operation. It must use remote byte-range
   access; if the server cannot provide the required ranges, fail instead of
   silently downloading the complete archive.
@@ -33,8 +40,6 @@ rules. Do not duplicate roadmap items or user-facing documentation.
   purpose; zget should remain differentiated by archive-member selection.
 - Do not add flags merely to recover the selective contract, such as
   `--range-only` or `--no-fallback`. Supplying `MEMBER` already expresses it.
-- Keep existing listing forms only as small supporting functionality; do not
-  grow zget into a general archive manager.
 - Prefer real user demand over speculative CLI features or abstractions.
 - Optimize discover-to-useful-result time to roughly 30 seconds and back the
   value proposition with reproducible measurements.
