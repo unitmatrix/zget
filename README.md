@@ -13,7 +13,6 @@ ordinary archives and scales to very large ones.
 zget https://example.com/archive.zip README.txt
 zget -o report.pdf https://example.com/documents.zip path/to/report.pdf
 zget -l https://example.com/archive.zip
-zget -l https://example.com/documents.zip path/to/report.pdf
 zget -1 https://example.com/archive.zip
 zget https://example.com/data.zip config.json | jq .
 ```
@@ -42,8 +41,8 @@ sudo install zget-X.Y.Z-linux-x86_64/zget /usr/local/bin/zget
 
 ```text
 zget [-o FILE] URL MEMBER
-zget -l URL [MEMBER]
-zget -1 URL [MEMBER]
+zget -l URL
+zget -1 URL
 ```
 
 ## Familiar by design
@@ -58,7 +57,7 @@ and emits only names.
 
 Extraction requires both a URL and an exact member name. A URL without a member
 is a usage error rather than an implicit request to list the archive; use `-l`
-explicitly to stream all entries, or add `MEMBER` to list one exact match.
+or `-1` explicitly to stream the complete Central Directory listing.
 
 Listings use the familiar `unzip -l` columns: uncompressed length, modification
 date and time in UTC, and member name. Timestamps are resolved from NTFS,
@@ -67,8 +66,7 @@ Central Directory once and retain only the current entry. Control characters
 and backslashes are escaped so every member stays on one safe output line.
 
 For a compact listing, `-1` writes only member names, one per line, with no
-header or totals. It accepts the same optional exact `MEMBER` as `-l` and uses
-the same safe escaping.
+header or totals, using the same safe escaping as `-l`.
 
 ## Why zget?
 
