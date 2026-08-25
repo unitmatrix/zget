@@ -41,52 +41,40 @@ Released in 0.4.0, but no longer aligned with the current minimal product goal.
 - Keep distribution simple for now: use the existing versioned release archives
   rather than adding installer scripts, extra release assets, taps, or packages.
 
-## Next
-
 ### Restore strict selective member retrieval
 
-- Keep extraction syntax focused on `zget [-o FILE] URL MEMBER`.
-- Remove transparent complete-download fallback for member extraction.
-- If required HTTP Range access is unavailable, fail clearly instead of
-  downloading the full archive.
-- Do not add whole-resource retrieval (`zget URL`); use curl for that job.
-- Do not add `--range-only`, `--no-fallback`, or similar mode flags: providing
-  `MEMBER` already defines the selective behavior.
-- Update implementation, regression tests, README, and `zget(1)` together.
+Completed on main after 0.5.0 for the next minor release.
+
+- Removed the transparent complete-download and local-file fallback paths.
+- Required valid HTTP Range responses for extraction and listing.
+- Kept the CLI focused on exact member retrieval and explicit listing without
+  adding whole-resource or range-policy modes.
+- Updated implementation, tests, README, and `zget(1)` together.
 
 ### Minimize the public library API
 
-- Center the public API on one-shot streaming `zget_get(url, member, ...)` and
-  one-shot streaming `zget_list(url, ...)` operations.
-- Internalize options, global initialization, and context/open/close lifecycle;
-  remove those APIs from the public surface.
-- Keep `zget_error_string()` and `zget_version()` public; keep only error codes
-  that can actually be returned by the simplified public operations.
-- Keep extraction callback + `userdata` as the streaming output contract; a
-  nonzero callback return aborts with `ZGET_ECALLBACK`.
-- Simplify library listing to whole-archive enumeration only, without an
-  optional exact member selector.
-- Public member names are valid UTF-8 and NUL-terminated. Resolve the ZIP name
-  using GP bit 11 UTF-8 first, then a usable Info-ZIP Unicode Path extra field
-  `0x7075`, then CP437-to-UTF-8 fallback. `name_length` is the byte length of the
-  exposed UTF-8 string and excludes the terminator.
-- `zget_get()` performs an exact case-sensitive match against the same resolved
-  UTF-8 names returned by `zget_list()`, without path or Unicode normalization.
-  If duplicate names exist, select the first matching Central Directory entry.
-- Make public listing metadata small and semantic: resolved name + length,
-  compressed/uncompressed sizes, CRC32, numeric compression method, and one
-  `int64_t mtime` Unix timestamp in UTC seconds.
-- Resolve `mtime` from NTFS extra field `0x000a` first, then Extended Timestamp
-  `0x5455`, then legacy DOS date/time interpreted as UTC. Discard NTFS
-  subsecond precision. Do not expose separate date/time structures or packed DOS
-  words.
-- Remove raw general-purpose ZIP flags and derived member flags from the public
-  metadata API.
-- Remove `struct_size` / `ZGET_MEMBER_INFO_V1_SIZE` from member metadata.
-- Do not expose external attributes unless a real use case appears.
-- Update headers, implementation, CLI adaptation, documentation, and focused API
-  tests together. This is a pre-1.0 API/ABI cleanup and belongs in the next minor
-  release rather than a 0.5.x patch.
+Completed on main after 0.5.0 for the next minor release.
+
+- Reduced the public API to one-shot streaming `zget_get()` and `zget_list()`
+  operations plus stable error text and runtime version reporting.
+- Internalized options, global initialization, and context lifecycle.
+- Made listing names semantic UTF-8 through the ZIP UTF-8 flag, Info-ZIP
+  Unicode Path, or CP437 fallback, with exact extraction against those names.
+- Exposed compact Central Directory metadata with resolved sizes, CRC32,
+  numeric compression method, and UTC Unix modification time.
+- Updated the CLI, documentation, package consumers, and focused regression
+  coverage for the intentional pre-1.0 API/ABI break.
+
+## Next
+
+### Real-world adoption and feedback
+
+- Exercise zget against real large hosted ZIP workloads such as datasets,
+  release/build artifacts, firmware archives, and object-storage/CDN content.
+- Let real usage determine whether any additional query, filtering, progress, or
+  format features are worth adding.
+
+## Deferred
 
 ### Benchmark and prove the value proposition
 
@@ -102,13 +90,6 @@ Released in 0.4.0, but no longer aligned with the current minimal product goal.
   large remote archive is useful.
 
 ## Planned
-
-### Real-world adoption and feedback
-
-- Exercise zget against real large hosted ZIP workloads such as datasets,
-  release/build artifacts, firmware archives, and object-storage/CDN content.
-- Let real usage determine whether any additional query, filtering, progress, or
-  format features are worth adding.
 
 ### Robustness and performance
 
