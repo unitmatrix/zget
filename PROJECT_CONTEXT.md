@@ -14,9 +14,11 @@ rules. Do not duplicate roadmap items or user-facing documentation.
 - `VERSION` is the single source of truth for the project version. Do not add
   manually synchronized version literals to tests or build plumbing.
 - Release 0.5.0 still contains the transparent complete-download fallback added
-  in 0.4.0 when a server ignores required Range requests. The current product
-  direction is to remove that fallback and return to a strict selective-access
-  contract.
+  in 0.4.0. Main removed that fallback in PR #36 and now requires selective
+  byte-range access for extraction and listing.
+- Main adopted the minimal one-shot public library API and semantic ZIP member
+  names and metadata in PR #37. This intentional API/ABI break is unreleased and
+  belongs in the next minor release, not a 0.5.x patch.
 - The earlier ideas for a sequential non-Range parser, `--range-only`, and a
   configurable fallback download limit were explicitly dropped. Do not
   resurrect them without a new decision.
@@ -130,7 +132,7 @@ rules. Do not duplicate roadmap items or user-facing documentation.
   when `bytes=-N` is rejected or ignored with the selected compatibility
   statuses, use a one-byte `bytes=0-0` probe to learn the total size and retry
   the equivalent explicit tail interval. This remains selective access and is
-  distinct from the complete-archive fallback that is to be removed.
+  distinct from the complete-archive fallback removed in PR #36.
 
 ## ZIP implementation boundaries
 
