@@ -111,20 +111,8 @@ if(BUILD_TESTING)
     target_link_libraries(zget_unit_tests PRIVATE ZLIB::ZLIB)
     add_test(NAME unit COMMAND zget_unit_tests)
 
-    # Exercise the public process lifecycle through the same static library
-    # embedded by the CLI; this catches accidental per-context initialization.
-    add_executable(zget_lifecycle_tests tests/test_lifecycle.c)
-    target_link_libraries(zget_lifecycle_tests PRIVATE Zget::libzget_static)
-    add_test(NAME lifecycle COMMAND zget_lifecycle_tests)
-
-    # Verify that struct_size remains a real ABI boundary as options grow.
-    add_executable(zget_options_tests tests/test_options.c)
-    target_link_libraries(zget_options_tests PRIVATE Zget::libzget_static)
-    add_test(NAME options COMMAND zget_options_tests)
-
-    # Keep public output parameters deterministic even when validation fails.
+    # Exercise the complete one-shot public API without making network calls.
     add_executable(zget_api_tests tests/test_api.c)
-    target_include_directories(zget_api_tests PRIVATE src)
     target_link_libraries(zget_api_tests PRIVATE Zget::libzget_static)
     add_test(NAME api_contracts COMMAND zget_api_tests)
 

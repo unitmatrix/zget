@@ -7,7 +7,6 @@
 #include <stdint.h>
 
 struct zget_http_options {
-    uint32_t max_requests;
     uint32_t max_redirects;
 };
 

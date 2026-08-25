@@ -5,27 +5,15 @@
 #include "source/source.h"
 #include "zget.h"
 
-#include <stdint.h>
-
 struct zget_format;
 
-/*
- * Format engines receive only limits that affect parsing or extraction. HTTP
- * request and redirect policy stays with the source that enforces it.
- */
-struct zget_format_options {
-    uint64_t max_metadata_bytes;
-    uint64_t max_output_size;
-};
-
 int zget_format_open(struct zget_source *source,
-                     const struct zget_format_options *options,
                      struct zget_error_state *error,
                      struct zget_format **out_format);
 int zget_format_extract_member(struct zget_format *format, const char *member,
                                zget_write_cb write_cb, void *userdata);
-int zget_format_list(struct zget_format *format, const char *member,
-                     zget_list_cb list_cb, void *userdata);
+int zget_format_list(struct zget_format *format, zget_list_cb list_cb,
+                     void *userdata);
 void zget_format_close(struct zget_format *format);
 
 #endif

@@ -147,6 +147,45 @@ def zip64_entry_archive():
     return local + central + eocd
 
 
+def semantic_archive(include_unicode=True, unicode_crc_valid=True,
+                     include_extended=True, include_ntfs=True,
+                     extended_value=1_000_000_000):
+    """Build one stored entry with independently controlled semantic metadata."""
+    raw_name = b"legacy\x82.txt"
+    resolved_name = "preferred.txt".encode()
+    payload = b"semantic payload"
+    crc = zlib.crc32(payload)
+    extra = b""
+    if include_unicode:
+        name_crc = zlib.crc32(raw_name)
+        if not unicode_crc_valid:
+            name_crc ^= 1
+        unicode_data = b"\x01" + struct.pack("<I", name_crc) + resolved_name
+        extra += struct.pack("<HH", 0x7075, len(unicode_data)) + unicode_data
+    if include_extended:
+        timestamp_data = b"\x01" + struct.pack("<i", extended_value)
+        extra += struct.pack("<HH", 0x5455, len(timestamp_data)) + timestamp_data
+    if include_ntfs:
+        # 2030-01-01 00:00:00 UTC as Windows FILETIME. The other two times are
+        # present but deliberately zero because only mtime is public.
+        ticks = (1_893_456_000 + 11_644_473_600) * 10_000_000
+        ntfs_data = b"\0" * 4 + struct.pack("<HHQQQ", 1, 24, ticks, 0, 0)
+        extra += struct.pack("<HH", 0x000A, len(ntfs_data)) + ntfs_data
+    local = struct.pack("<IHHHHHIIIHH", 0x04034B50, 20, 0, 0, 0, 0,
+                        crc, len(payload), len(payload), len(raw_name), 0)
+    local += raw_name + payload
+    # DOS fallback is 2026-04-08 13:40 UTC.
+    dos_time = (13 << 11) | (40 << 5)
+    dos_date = ((2026 - 1980) << 9) | (4 << 5) | 8
+    central = struct.pack("<IHHHHHHIIIHHHHHII", 0x02014B50, 20, 20, 0, 0,
+                          dos_time, dos_date, crc, len(payload), len(payload),
+                          len(raw_name), len(extra), 0, 0, 0, 0, 0)
+    central += raw_name + extra
+    eocd = struct.pack("<IHHHHIIH", 0x06054B50, 0, 0, 1, 1,
+                       len(central), len(local), 0)
+    return local + central + eocd
+
+
 def run_server(data, mode, test):
     """Run one isolated server mode and return its observed request count."""
     server = serve(data, mode)
@@ -275,13 +314,13 @@ def main(binary):
     stored_cd = central_entry(data, "stored.txt")
     invalid_date = mutate(data, stored_cd + 14, b"\x00\x00")
 
-    def unknown_timestamp_listing(base):
-        """Invalid packed dates remain visible as unknown instead of normalized."""
+    def invalid_timestamp_listing(base):
+        """Reject an entry when no valid modification-time source exists."""
         result = subprocess.run(
             [binary, "-l", base + "/archive.zip", "stored.txt"],
-            check=True, stdout=subprocess.PIPE)
-        assert f"{14:9d}  ---------- -----   stored.txt".encode() in result.stdout
-    run_server(invalid_date, "normal", unknown_timestamp_listing)
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        assert result.returncode != 0
+    run_server(invalid_date, "normal", invalid_timestamp_listing)
 
     def empty_listing(base):
         """An empty archive needs no zero-length Central Directory request."""
@@ -435,12 +474,12 @@ def main(binary):
     expect_failure(data, mode="payload-size-change", no_output=True)
     for mode in ("403", "404", "416"):
         def explicit_http_status(base, mode=mode):
-            """Expose the final HTTP status instead of a combined vague error."""
+            """Map explicit HTTP failures to the stable public error."""
             result = subprocess.run([binary, base + "/archive.zip", "stored.txt"],
                                     stdout=subprocess.PIPE,
                                     stderr=subprocess.PIPE)
             assert result.returncode != 0
-            assert f"HTTP {mode}".encode() in result.stderr, result.stderr
+            assert b"HTTP error" in result.stderr, (mode, result.stderr)
         run_server(data, mode, explicit_http_status)
     expect_failure(data, mode="drop")
     expect_failure(data, path="/redirect-loop")
@@ -531,8 +570,7 @@ def main(binary):
         assert result.returncode != 0
     run_server(invalid_name, "normal", invalid_listing)
 
-    # Legacy high bytes have no trustworthy text encoding in current scope.
-    # Listing preserves them visibly as byte escapes instead of guessing CP437.
+    # Legacy names resolve through CP437 and can be used for exact UTF-8 lookup.
     legacy_name = bytearray(data)
     legacy_flags = int.from_bytes(legacy_name[unicode_cd + 8:unicode_cd + 10],
                                   "little") & ~(1 << 11)
@@ -541,11 +579,63 @@ def main(binary):
     legacy_name[high:high + 2] = b"\x82\xa0"
 
     def legacy_listing(base):
-        """Escape raw legacy bytes while keeping the rest of the listing usable."""
+        """Emit and match the UTF-8 form of a legacy CP437 member name."""
         result = subprocess.run([binary, "-l", base + "/archive.zip"],
                                 check=True, stdout=subprocess.PIPE)
-        assert b"unicod\\x82\\xa0.txt" in result.stdout
+        assert "unicod\u00e9\u00e1.txt".encode() in result.stdout
+        extracted = subprocess.run(
+            [binary, base + "/archive.zip", "unicod\u00e9\u00e1.txt"],
+            check=True, stdout=subprocess.PIPE)
+        assert extracted.stdout == b"hello"
     run_server(bytes(legacy_name), "normal", legacy_listing)
+
+    def semantic_metadata(base):
+        """Prefer valid Unicode Path and NTFS mtime over all fallbacks."""
+        url = base + "/archive.zip"
+        listed = subprocess.run([binary, "-l", url], check=True,
+                                stdout=subprocess.PIPE).stdout
+        assert b"01-01-2030 00:00   preferred.txt" in listed
+        extracted = subprocess.run([binary, url, "preferred.txt"], check=True,
+                                   stdout=subprocess.PIPE).stdout
+        assert extracted == b"semantic payload"
+    run_server(semantic_archive(), "normal", semantic_metadata)
+
+    def extended_timestamp(base):
+        """Use Extended Timestamp when NTFS mtime is absent."""
+        listed = subprocess.run([binary, "-l", base + "/archive.zip"],
+                                check=True, stdout=subprocess.PIPE).stdout
+        assert b"09-09-2001 01:46   preferred.txt" in listed
+    run_server(semantic_archive(include_ntfs=False), "normal",
+               extended_timestamp)
+
+    def negative_timestamp(base):
+        """Preserve signed Extended Timestamp values before the Unix epoch."""
+        listed = subprocess.run([binary, "-l", base + "/archive.zip"],
+                                check=True, stdout=subprocess.PIPE).stdout
+        assert b"12-31-1969 23:59   preferred.txt" in listed
+    run_server(semantic_archive(include_ntfs=False, extended_value=-1),
+               "normal", negative_timestamp)
+
+    def bad_unicode_crc(base):
+        """Ignore a Unicode Path field whose raw-name CRC does not match."""
+        url = base + "/archive.zip"
+        listed = subprocess.run([binary, "-1", url], check=True,
+                                stdout=subprocess.PIPE).stdout
+        assert listed == "legacy\u00e9.txt\n".encode()
+        extracted = subprocess.run([binary, url, "legacy\u00e9.txt"], check=True,
+                                   stdout=subprocess.PIPE).stdout
+        assert extracted == b"semantic payload"
+    run_server(semantic_archive(unicode_crc_valid=False), "normal",
+               bad_unicode_crc)
+
+    embedded_nul = mutate(data, stored_cd + 46 + 3, b"\0")
+    expect_failure(embedded_nul, member="missing")
+
+    unknown_cd = central_entry(data, "unknown-extra.txt")
+    unknown_name_length = len("unknown-extra.txt")
+    malformed_extra = mutate(data, unknown_cd + 46 + unknown_name_length + 2,
+                             b"\xff\xff")
+    expect_failure(malformed_extra, member="missing")
 
     def missing(base):
         """Verify lookup failure after scanning a non-empty directory."""

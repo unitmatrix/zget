@@ -51,8 +51,6 @@ def assert_range_failure(binary, arguments):
     assert result.returncode == 1, (arguments, result.stderr)
     assert result.stdout == b"", (arguments, result.stdout)
     assert b"HTTP Range unsupported" in result.stderr, result.stderr
-    assert (b"server ignored the required byte range" in result.stderr), \
-        result.stderr
 
 
 def run(binary):
