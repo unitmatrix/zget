@@ -60,12 +60,11 @@ Extraction requires both a URL and an exact member name. A URL without a member
 is a usage error rather than an implicit request to list the archive; use `-l`
 explicitly to stream all entries, or add `MEMBER` to list one exact match.
 
-Listings use the familiar `unzip -l` columns: uncompressed length, ZIP-local
-modification date and time, and member name. ZIP timestamps have no timezone;
-invalid packed timestamps are shown as dashes rather than normalized. Listings
-scan the Central Directory once and retain only the current entry. Control
-characters, backslashes, and legacy non-UTF-8 name bytes are escaped so every
-member stays on one safe output line.
+Listings use the familiar `unzip -l` columns: uncompressed length, modification
+date and time in UTC, and member name. Timestamps are resolved from NTFS,
+Extended Timestamp, or packed DOS metadata in that order. Listings scan the
+Central Directory once and retain only the current entry. Control characters
+and backslashes are escaped so every member stays on one safe output line.
 
 For a compact listing, `-1` writes only member names, one per line, with no
 header or totals. It accepts the same optional exact `MEMBER` as `-l` and uses
@@ -175,11 +174,11 @@ installed `libzget`; curl, zlib, TLS, and the platform C runtime remain dynamic.
 ## Library
 
 `libzget` is the reusable implementation behind the `zget` CLI. Its installed
-header is `<zget.h>` and its public API deals only in URLs, opaque contexts,
-format-neutral member records, callbacks, and zget error codes. libcurl and
-zlib remain private implementation dependencies: applications do not include
-their headers or manipulate their handles to use the high-level API. Current
-library support is HTTP(S), single-volume ZIP/ZIP64, STORE, and DEFLATE.
+header is `<zget.h>`. The public API consists of two synchronous one-shot
+operations, callbacks, member records, and zget error codes; it exposes no
+contexts, global lifecycle, or transport handles. libcurl and zlib remain
+private implementation dependencies. Current library support is HTTP(S),
+single-volume ZIP/ZIP64, STORE, and DEFLATE.
 
 The library is pre-1.0. Its API and ABI may change between minor releases while
 the design is refined; patch releases preserve the ABI within one `0.MINOR`
@@ -193,7 +192,7 @@ cc -o example example.c $(pkg-config --cflags --libs libzget)
 ```
 
 Or use the installed CMake target `Zget::libzget` after
-`find_package(Zget 0.4 REQUIRED)`.
+`find_package(Zget 0.5 REQUIRED)`.
 
 ### Minimal extraction example
 
@@ -210,30 +209,15 @@ static int write_stdout(void *userdata, const void *data, size_t size)
 
 int main(int argc, char **argv)
 {
-    zget_ctx *ctx = NULL;
     int rc;
 
     if (argc != 3) {
         fprintf(stderr, "usage: %s URL MEMBER\n", argv[0]);
         return 2;
     }
-    rc = zget_global_init();
-    if (rc != ZGET_OK) {
+    rc = zget_get(argv[1], argv[2], write_stdout, stdout);
+    if (rc != ZGET_OK)
         fprintf(stderr, "zget: %s\n", zget_error_string(rc));
-        return 1;
-    }
-
-    rc = zget_open_url_ex(argv[1], NULL, &ctx);
-    if (rc == ZGET_OK)
-        rc = zget_extract_member(ctx, argv[2], write_stdout, stdout);
-    if (rc != ZGET_OK) {
-        const char *detail = ctx != NULL ? zget_last_error_message(ctx) : "";
-        fprintf(stderr, "zget: %s%s%s\n", zget_error_string(rc),
-                detail[0] != '\0' ? ": " : "", detail);
-    }
-
-    zget_close(ctx);
-    zget_global_cleanup();
     return rc == ZGET_OK ? 0 : 1;
 }
 ```
@@ -247,9 +231,8 @@ semantics instead.
 
 ### Listing
 
-`zget_list()` streams one borrowed, length-delimited record at a time and does
-not construct an archive-wide index. Pass NULL as the member path to list every
-entry, or an exact path to emit only the first match:
+`zget_list()` streams every Central Directory entry as one borrowed record and
+does not construct an archive-wide index:
 
 ```c
 static int print_member(void *userdata, const zget_member_info *member)
@@ -262,53 +245,18 @@ static int print_member(void *userdata, const zget_member_info *member)
     return 0;
 }
 
-/* ctx is an open zget_ctx. */
-rc = zget_list(ctx, NULL, print_member, stdout);
+rc = zget_list(url, print_member, stdout);
 ```
 
-The record and its name become invalid when the callback returns. Validated
-modification components are local calendar values because ZIP stores no
-timezone. When `ZGET_MEMBER_NAME_UTF8` is absent, the name contains legacy raw
-bytes and should be preserved or escaped rather than decoded by guesswork.
+The record and its NUL-terminated name become invalid when the callback
+returns. Every name is valid UTF-8. Resolution uses the ZIP UTF-8 flag first,
+then a valid Info-ZIP Unicode Path (`0x7075`) field, then CP437 conversion.
+`mtime` is signed Unix time in UTC seconds. The record also supplies compressed
+and uncompressed sizes, CRC32, and the numeric ZIP compression method.
 
-### Lifecycle, limits, and threads
-
-Call `zget_global_init()` during single-threaded application startup and match
-every successful call with `zget_global_cleanup()` during shutdown after all
-contexts are closed. The CLI handles this lifecycle automatically.
-
-`zget_open_url_ex()` retains a diagnostic context on most opening failures;
-inspect it with `zget_last_error_message()` and always release it with
-`zget_close()`. `zget_open_url()` is shorter when only success or failure is
-needed, while `zget_get()` performs one open/extract/close sequence using
-default options.
-
-A context must not be used concurrently or reentered from one of its callbacks.
-After global initialization, different contexts may be used by different
-threads. `max_output_size`, `max_metadata_bytes`, and `max_http_requests` let
-embedding applications impose defensive limits. The CLI leaves output and
-metadata sizes unrestricted. Always start custom options with
-`zget_options_init()`; the library copies the structure while opening.
-
-### Migrating to 0.3
-
-Version 0.3 removes the ZIP-specific `zget_entry`, `zget_find()`, and
-`zget_extract()` interface. Replace the old two-step extraction:
-
-```c
-zget_find(ctx, path, &entry);
-zget_extract(ctx, &entry, write_cb, userdata);
-```
-
-with the format-neutral operation:
-
-```c
-zget_extract_member(ctx, path, write_cb, userdata);
-```
-
-Use `zget_list(ctx, path, list_cb, userdata)` when only member metadata is
-needed. This keeps ZIP offsets, flags, compression details, and CRC state inside
-the library so those implementation details can evolve safely.
+Both public operations manage their own resources and libcurl lifecycle. They
+are synchronous and callbacks run inline. Independent calls share no archive
+state and may be made from different threads on supported libcurl builds.
 
 ## HTTP invariants
 
@@ -316,8 +264,7 @@ Range-capable servers must return each accepted archive-data response as a
 matching `206 Partial Content` response with the correct body length. The
 initial tail normally uses a suffix range. If a server rejects or ignores that
 syntax but supports explicit ranges, zget uses a one-byte size probe and retries
-the tail as an explicit interval. These extra requests count toward
-`max_http_requests`.
+the tail as an explicit interval.
 
 If a server ignores the required Range request entirely and returns HTTP 200
 with the complete representation, zget rejects the response with
@@ -341,8 +288,8 @@ write to stdout, which likewise cannot be rolled back after a late error.
 - Exact, case-sensitive full member paths; no normalization or globbing.
 - Single-volume ZIP32 and ZIP64, including data descriptors.
 - Compression methods STORE (0) and DEFLATE (8) only.
-- UTF-8-flagged names must be valid UTF-8. Legacy names are eligible for exact
-  matching only when entirely ASCII; CP437 conversion is intentionally absent.
+- Names are resolved to valid UTF-8 using the UTF-8 flag, a valid Info-ZIP
+  Unicode Path field, or CP437. Embedded NUL bytes are malformed.
 - No encryption, split archives, resume, or random seeks within a DEFLATE
   member.
 - HTTP Range support is required. Servers that ignore required Range requests

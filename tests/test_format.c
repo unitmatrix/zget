@@ -22,10 +22,11 @@ struct output_buffer {
 struct member_buffer {
     char name[16];
     size_t name_length;
+    uint64_t compressed_size;
     uint64_t uncompressed_size;
-    uint32_t flags;
-    uint16_t modified_year;
-    uint8_t modified_month, modified_day, modified_hour, modified_minute;
+    uint32_t crc32;
+    uint16_t compression_method;
+    int64_t mtime;
     unsigned int count;
 };
 
@@ -44,7 +45,7 @@ static int deliver(struct memory_source *memory, uint64_t offset,
 
     /* Format callbacks set the useful diagnostic before rejecting input. */
     return memory->source.error->code != ZGET_OK ?
-           memory->source.error->code : ZGET_EIO;
+           memory->source.error->code : ZGET_EZIP;
 }
 
 static int memory_read_range(struct zget_source *source, uint64_t offset,
@@ -149,22 +150,27 @@ static int collect(void *userdata, const void *data, size_t length)
     return 0;
 }
 
+static int reject_output(void *userdata, const void *data, size_t length)
+{
+    (void)userdata;
+    (void)data;
+    (void)length;
+    return 1;
+}
+
 static int collect_member(void *userdata, const zget_member_info *member)
 {
     struct member_buffer *output = userdata;
 
-    if (member->struct_size < ZGET_MEMBER_INFO_V1_SIZE ||
-        member->name_length > sizeof(output->name))
+    if (member->name_length > sizeof(output->name))
         return 1;
     memcpy(output->name, member->name, member->name_length);
     output->name_length = member->name_length;
+    output->compressed_size = member->compressed_size;
     output->uncompressed_size = member->uncompressed_size;
-    output->flags = member->flags;
-    output->modified_year = member->modified_year;
-    output->modified_month = member->modified_month;
-    output->modified_day = member->modified_day;
-    output->modified_hour = member->modified_hour;
-    output->modified_minute = member->modified_minute;
+    output->crc32 = member->crc32;
+    output->compression_method = member->compression_method;
+    output->mtime = member->mtime;
     ++output->count;
     return 0;
 }
@@ -181,7 +187,6 @@ int main(void)
     unsigned char bytes[113];
     struct zget_error_state error = {0};
     struct memory_source memory = {0};
-    struct zget_format_options options = {1024 * 1024, 0};
     struct zget_format *format = NULL;
     struct output_buffer output = {0};
     struct member_buffer members = {0};
@@ -193,7 +198,7 @@ int main(void)
     memory.source.size = memory.length;
     memory.source.size_known = true;
 
-    rc = zget_format_open(&memory.source, &options, &error, &format);
+    rc = zget_format_open(&memory.source, &error, &format);
     if (rc != ZGET_OK || format == NULL || memory.reads != 1)
         goto fail;
     /* Extraction keeps the ZIP locator entirely inside the format engine. */
@@ -204,25 +209,18 @@ int main(void)
         goto fail;
 
     /* Listing traverses the same format engine and borrows one record at a time. */
-    rc = zget_format_list(format, NULL, collect_member, &members);
+    rc = zget_format_list(format, collect_member, &members);
     if (rc != ZGET_OK || members.count != 1 ||
         members.name_length != 5 || memcmp(members.name, "a.txt", 5) != 0 ||
-        members.uncompressed_size != 5 ||
-        members.flags != (ZGET_MEMBER_NAME_UTF8 |
-                          ZGET_MEMBER_HAS_MODIFIED_TIME) ||
-        members.modified_year != 2026 || members.modified_month != 4 ||
-        members.modified_day != 8 || members.modified_hour != 13 ||
-        members.modified_minute != 40 || memory.reads != 5)
+        members.compressed_size != 5 || members.uncompressed_size != 5 ||
+        members.crc32 != 0x3610a686u || members.compression_method != 0 ||
+        members.mtime != INT64_C(1775655600) || memory.reads != 5)
         goto fail;
-    memset(&members, 0, sizeof(members));
-    rc = zget_format_list(format, "a.txt", collect_member, &members);
-    if (rc != ZGET_OK || members.count != 1 || memory.reads != 6)
+    rc = zget_format_list(format, reject_member, NULL);
+    if (rc != ZGET_ECALLBACK || memory.reads != 6)
         goto fail;
-    rc = zget_format_list(format, NULL, reject_member, NULL);
-    if (rc != ZGET_EIO || memory.reads != 7)
-        goto fail;
-    rc = zget_format_list(format, "missing", collect_member, &members);
-    if (rc != ZGET_ENOTFOUND || memory.reads != 8)
+    rc = zget_format_extract_member(format, "a.txt", reject_output, NULL);
+    if (rc != ZGET_ECALLBACK || memory.reads != 9)
         goto fail;
 
     zget_format_close(format);

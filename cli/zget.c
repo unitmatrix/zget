@@ -14,10 +14,18 @@ struct file_output {
 
 struct list_output {
     struct file_output stream;
+    const char *member;
     uint64_t entries;
     uint64_t total_size;
     int total_overflow;
     int names_only;
+    int found;
+    int header_written;
+};
+
+struct utc_time {
+    int64_t year;
+    unsigned int month, day, hour, minute;
 };
 
 static int write_stream(struct file_output *out, const void *data, size_t size)
@@ -43,9 +51,7 @@ static int write_escaped_name(struct list_output *out,
 
     for (i = 0; i < member->name_length; ++i) {
         const unsigned char byte = name[i];
-        const int raw = byte >= 0x20 && byte != 0x7f && byte != '\\' &&
-                        ((member->flags & ZGET_MEMBER_NAME_UTF8) != 0 ||
-                         byte < 0x80);
+        const int raw = byte >= 0x20 && byte != 0x7f && byte != '\\';
         const char *escape = NULL;
         char hex[4];
 
@@ -78,11 +84,65 @@ static int write_escaped_name(struct list_output *out,
                         member->name_length - begin);
 }
 
+static int write_list_header(struct list_output *out)
+{
+    static const char header[] =
+        "  Length      Date    Time    Name\n"
+        "---------  ---------- -----   ----\n";
+
+    if (out->header_written)
+        return 0;
+    out->header_written = 1;
+    return write_stream(&out->stream, header, sizeof(header) - 1);
+}
+
+/* Convert days since 1970-01-01 using the proleptic Gregorian calendar. */
+static void civil_from_days(int64_t days, struct utc_time *time)
+{
+    int64_t z, era, year_of_era, day_of_year, month_prime;
+
+    z = days + 719468;
+    era = (z >= 0 ? z : z - 146096) / 146097;
+    day_of_year = z - era * 146097;
+    year_of_era = (day_of_year - day_of_year / 1460 +
+                   day_of_year / 36524 - day_of_year / 146096) / 365;
+    time->year = year_of_era + era * 400;
+    day_of_year -= 365 * year_of_era + year_of_era / 4 - year_of_era / 100;
+    month_prime = (5 * day_of_year + 2) / 153;
+    time->day = (unsigned int)(day_of_year -
+                               (153 * month_prime + 2) / 5 + 1);
+    time->month = (unsigned int)(month_prime +
+                                 (month_prime < 10 ? 3 : -9));
+    time->year += time->month <= 2;
+}
+
+static int utc_time_from_epoch(int64_t seconds, struct utc_time *time)
+{
+    int64_t days = seconds / 86400;
+    int64_t remainder = seconds % 86400;
+
+    if (remainder < 0) {
+        --days;
+        remainder += 86400;
+    }
+    civil_from_days(days, time);
+    time->hour = (unsigned int)(remainder / 3600);
+    time->minute = (unsigned int)((remainder % 3600) / 60);
+    return time->year >= 0 && time->year <= 9999;
+}
+
 static int list_member(void *opaque, const zget_member_info *member)
 {
     struct list_output *out = opaque;
+    struct utc_time time;
     char prefix[64];
     int length;
+
+    if (out->member != NULL &&
+        (out->found || strcmp(out->member, member->name) != 0))
+        return 0;
+    if (out->member != NULL)
+        out->found = 1;
 
     /*
      * The short form deliberately shares the normal name encoder. Besides
@@ -93,15 +153,14 @@ static int list_member(void *opaque, const zget_member_info *member)
         return write_escaped_name(out, member) ||
                write_stream(&out->stream, "\n", 1);
 
-    if ((member->flags & ZGET_MEMBER_HAS_MODIFIED_TIME) != 0)
+    if (write_list_header(out))
+        return 1;
+    if (utc_time_from_epoch(member->mtime, &time))
         length = snprintf(prefix, sizeof(prefix),
-                          "%9" PRIu64 "  %02u-%02u-%04u %02u:%02u   ",
+                          "%9" PRIu64 "  %02u-%02u-%04" PRId64 " %02u:%02u   ",
                           member->uncompressed_size,
-                          (unsigned int)member->modified_month,
-                          (unsigned int)member->modified_day,
-                          (unsigned int)member->modified_year,
-                          (unsigned int)member->modified_hour,
-                          (unsigned int)member->modified_minute);
+                          time.month, time.day, time.year,
+                          time.hour, time.minute);
     else
         length = snprintf(prefix, sizeof(prefix),
                           "%9" PRIu64 "  ---------- -----   ",
@@ -130,9 +189,7 @@ int main(int argc, char **argv)
 {
     const char *output_path = NULL, *url, *member = NULL;
     struct file_output output = {stdout, 0};
-    struct list_output listing = {{stdout, 0}, 0, 0, 0, 0};
-    zget_ctx *ctx = NULL;
-    zget_options options;
+    struct list_output listing = {{stdout, 0}, NULL, 0, 0, 0, 0, 0, 0};
     int arg = 1, close_output = 0, list_mode = 0, rc, exit_status = 1;
 
     if (argc == 2 && !strcmp(argv[1], "--version")) {
@@ -180,40 +237,26 @@ int main(int argc, char **argv)
     }
 #endif
 
-    /* The CLI owns one process-wide acquisition around all network work. */
-    rc = zget_global_init();
-    if (rc != ZGET_OK) {
-        fprintf(stderr, "zget: %s\n", zget_error_string(rc));
-        return 1;
-    }
-    zget_options_init(&options);
-    /* CLI users may legitimately target archives with enormous directories. */
-    options.max_metadata_bytes = UINT64_MAX;
-    rc = zget_open_url_ex(url, &options, &ctx);
-    if (rc != ZGET_OK)
-        goto zget_failure;
-
     if (list_mode) {
-        static const char header[] =
-            "  Length      Date    Time    Name\n"
-            "---------  ---------- -----   ----\n";
         static const char footer[] =
             "---------                     -------\n";
         char summary[96];
         int length;
 
-        /* Names-only output has no decoration, matching zipinfo -1. */
-        if (!listing.names_only &&
-            write_stream(&listing.stream, header, sizeof(header) - 1))
-            goto done;
-        rc = zget_list(ctx, member, list_member, &listing);
+        listing.member = member;
+        rc = zget_list(url, list_member, &listing);
         if (rc != ZGET_OK) {
             if (listing.stream.broken_pipe)
                 goto done;
             goto zget_failure;
         }
+        if (member != NULL && !listing.found) {
+            rc = ZGET_ENOTFOUND;
+            goto zget_failure;
+        }
         if (!listing.names_only) {
-            if (write_stream(&listing.stream, footer, sizeof(footer) - 1))
+            if (write_list_header(&listing) ||
+                write_stream(&listing.stream, footer, sizeof(footer) - 1))
                 goto done;
             if (listing.total_overflow)
                 length = snprintf(summary, sizeof(summary),
@@ -249,8 +292,7 @@ int main(int argc, char **argv)
         close_output = 1;
     }
 
-    /* Keep ZIP-specific lookup details behind libzget's format-neutral API. */
-    rc = zget_extract_member(ctx, member, write_file, &output);
+    rc = zget_get(url, member, write_file, &output);
     if (rc != ZGET_OK) {
         if (output.broken_pipe)
             goto done;
@@ -275,14 +317,10 @@ int main(int argc, char **argv)
     goto done;
 
 zget_failure:
-    fprintf(stderr, "zget: %s%s%s\n", zget_error_string(rc),
-            ctx != NULL && zget_last_error_message(ctx)[0] != '\0' ? ": " : "",
-            ctx != NULL ? zget_last_error_message(ctx) : "");
+    fprintf(stderr, "zget: %s\n", zget_error_string(rc));
 done:
     /* stdout is borrowed; only a stream opened for named output is owned. */
     if (close_output && output.file != NULL)
         (void)fclose(output.file);
-    zget_close(ctx);
-    zget_global_cleanup();
     return exit_status;
 }

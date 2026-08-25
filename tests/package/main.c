@@ -21,15 +21,11 @@ int main(void)
 {
     int failed = 0;
 
-    if (zget_global_init() != ZGET_OK)
-        return 1;
-    /* Referencing the new symbol also verifies package export visibility. */
-    if (zget_extract_member(NULL, "member", discard, NULL) != ZGET_EINVAL)
+    if (zget_get(NULL, "member", discard, NULL) != ZGET_EINVAL)
         failed = 1;
-    else if (zget_list(NULL, NULL, discard_member, NULL) != ZGET_EINVAL)
+    else if (zget_list(NULL, discard_member, NULL) != ZGET_EINVAL)
         failed = 1;
     else
         puts(zget_version());
-    zget_global_cleanup();
     return failed;
 }

@@ -1,4 +1,4 @@
-.TH ZGET 1 "August 24, 2026" "zget @PROJECT_VERSION@" "User Commands"
+.TH ZGET 1 "August 25, 2026" "zget @PROJECT_VERSION@" "User Commands"
 .SH NAME
 zget \- fetch one member from a remote ZIP archive
 .SH SYNOPSIS
@@ -51,11 +51,11 @@ selects standard output.
 .PP
 .B \-l
 streams a listing directly from the Central Directory. Each output row contains
-the uncompressed length, ZIP-local modification date and time, and member name
+the uncompressed length, UTC modification date and time, and member name
 in a layout inspired by
 .BR unzip (1).
-ZIP timestamps have no timezone; invalid packed timestamps are shown as dashes.
-Control characters, backslashes, and legacy non-UTF-8 bytes are escaped so an
+Timestamps are resolved from NTFS, Extended Timestamp, or packed DOS metadata
+in that order. Control characters and backslashes are escaped so an
 archive name cannot create additional terminal lines. Listing memory use is
 independent of the entry count.
 .PP
@@ -79,13 +79,13 @@ selects standard output.
 .B \-l
 List archive members to standard output. With
 .IR MEMBER ,
-emit the first exact match and stop; otherwise emit every member. A URL without
+emit only the first exact match; otherwise emit every member. A URL without
 this explicit option does not imply listing.
 .TP
 .B \-1
 List only archive member names, one per line. With
 .IR MEMBER ,
-emit the first exact match and stop; otherwise emit every member.
+emit only the first exact match; otherwise emit every member.
 .TP
 .BR \-h , " " \-\-help
 Show command usage and exit.
@@ -97,8 +97,7 @@ For Range-capable servers, each response accepted as archive data must be a
 matching 206 Partial Content response with an identity Content-Encoding and the
 expected Content-Range and body length. If a server rejects or ignores the
 initial suffix range but supports explicit ranges, zget uses a one-byte size
-probe and retries the tail as an explicit interval. These extra requests count
-toward the configured HTTP request limit.
+probe and retries the tail as an explicit interval.
 .PP
 If the server ignores a required Range request entirely and returns HTTP 200
 with the complete representation, zget rejects the response with a Range error.
@@ -160,8 +159,9 @@ zget -1 https://example.com/archive.zip
 Only single-volume ZIP32 and ZIP64 archives are supported. Member names are
 exact full paths; there is no path normalization or globbing. Compression
 methods are limited to STORE and DEFLATE. Encryption and split archives are
-not supported. Servers must provide valid HTTP Range responses; zget does not
-fall back to downloading the complete archive.
+not supported. Names resolve to UTF-8 using the ZIP UTF-8 flag, a valid Info-ZIP
+Unicode Path field, or CP437. Servers must provide valid HTTP Range responses;
+zget does not fall back to downloading the complete archive.
 .SH SEE ALSO
 .BR curl (1),
 .BR unzip (1),

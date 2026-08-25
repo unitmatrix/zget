@@ -19,8 +19,6 @@ struct zget_http_source {
     char *url;
     char *effective_url;
     char *strong_etag;
-    uint64_t requests;
-    uint32_t max_requests;
     uint32_t max_redirects;
 };
 
@@ -287,11 +285,6 @@ static int perform_range(struct zget_http_source *http, uint64_t offset,
                        "invalid zero-length range request");
         return ZGET_EINVAL;
     }
-    if (http->max_requests != 0 && http->requests >= http->max_requests) {
-        zget_error_set(http->source.error, ZGET_ELIMIT,
-                       "HTTP request limit exceeded");
-        return ZGET_ELIMIT;
-    }
     if (suffix)
         (void)snprintf(range, sizeof(range), "-%" PRIu64, length);
     else {
@@ -354,7 +347,6 @@ static int perform_range(struct zget_http_source *http, uint64_t offset,
     SETOPT(CURLOPT_HTTPHEADER, headers);
     SETOPT(CURLOPT_WRITEFUNCTION, body_cb);
     SETOPT(CURLOPT_WRITEDATA, &r);
-    ++http->requests;
     cc = curl_easy_perform(http->curl);
 
     /* Zero-length/error responses may never invoke body_cb; inspect them here. */
@@ -365,7 +357,7 @@ static int perform_range(struct zget_http_source *http, uint64_t offset,
         goto done;
     if (r.callback_failed) {
         if (http->source.error->code == ZGET_OK)
-            zget_error_set(http->source.error, ZGET_EIO,
+            zget_error_set(http->source.error, ZGET_ECALLBACK,
                            "range consumer rejected output");
         goto done;
     }
@@ -596,7 +588,6 @@ int zget_http_source_open(const char *url,
         return ZGET_ENOMEM;
     }
     zget_source_init(&http_source->source, &http_ops, error);
-    http_source->max_requests = options->max_requests;
     http_source->max_redirects = options->max_redirects;
     http_source->url = zget_strdup(url);
     if (http_source->url == NULL) {

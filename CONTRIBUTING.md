@@ -11,8 +11,8 @@ The library joins two independent internal abstractions in `src/zget.c`:
 - `src/source/` owns range-addressable byte access, source identity, and
   transport policy. Backends must not interpret container metadata.
 - `src/format/` owns container discovery, member lookup, and extraction.
-  Engines borrow their source and shared error state from `zget_ctx`; they must
-  not close either one.
+  Engines borrow their source and shared error state from the active operation;
+  they must not close either one.
 
 ZIP-specific state and code live under `src/format/zip/`, including EOCD and
 ZIP64 handling, streaming Central Directory parsing, Local Headers, STORE,
