@@ -65,10 +65,13 @@ Released in 0.4.0, but no longer aligned with the current minimal product goal.
 - Keep extraction callback + `userdata` as the streaming output contract.
 - Simplify listing to whole-archive enumeration only, without an optional exact
   member selector.
-- Make public listing metadata reflect useful raw Central Directory data:
-  name bytes + length, ZIP flags, DOS date/time, compressed/uncompressed sizes,
-  CRC32, and compression method. Avoid derived metadata flags and calendar
-  interpretation in the library API.
+- Make public listing metadata reflect useful Central Directory data at its
+  semantic type: name bytes + length, ZIP flags, separate `zget_date` and
+  `zget_time` modification values, compressed/uncompressed sizes, CRC32, and
+  compression method. Do not expose packed DOS date/time words or invent
+  timezone/DST/weekday semantics.
+- Avoid derived metadata flags such as library-invented UTF-8/time-presence
+  flags when the underlying ZIP metadata already carries the relevant facts.
 - Do not expose external attributes unless a real use case appears.
 - Update headers, implementation, CLI adaptation, documentation, and focused API
   tests together. This is a pre-1.0 API/ABI cleanup and belongs in the next minor
