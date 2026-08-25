@@ -25,11 +25,9 @@ zget \- fetch one member from a remote ZIP archive
 .SH DESCRIPTION
 .B zget
 fetches one exact, case-sensitive member from a remote ZIP or ZIP64 archive.
-It prefers HTTP Range requests so only the required archive bytes are
-transferred. If a server ignores Range requests entirely and returns the
-complete representation, zget transparently downloads the archive into
-anonymous temporary storage and continues locally. That compatibility fallback
-necessarily transfers the entire archive.
+It uses HTTP Range requests so only the required archive bytes are transferred.
+If a server cannot provide the required ranges, zget fails rather than silently
+downloading the complete archive.
 .PP
 The Central Directory is parsed as a stream. Metadata for each non-matching
 entry is discarded immediately, so memory use is independent of the archive
@@ -103,10 +101,11 @@ probe and retries the tail as an explicit interval. These extra requests count
 toward the configured HTTP request limit.
 .PP
 If the server ignores a required Range request entirely and returns HTTP 200
-with the complete representation, zget performs one complete download into an
-anonymous temporary file and continues through its local-file source. This
-preserves normal extraction and listing semantics but forfeits the bandwidth
-savings of Range-based access.
+with the complete representation, zget rejects the response with a Range error.
+Supplying
+.I MEMBER
+requests selective retrieval; zget never silently replaces it with a complete
+archive download.
 .PP
 HTTPS redirects may not downgrade to HTTP. A strong ETag, when supplied by the
 server, is used with subsequent Range requests to ensure that all ranges refer
@@ -161,8 +160,8 @@ zget -1 https://example.com/archive.zip
 Only single-volume ZIP32 and ZIP64 archives are supported. Member names are
 exact full paths; there is no path normalization or globbing. Compression
 methods are limited to STORE and DEFLATE. Encryption and split archives are
-not supported. Servers that ignore HTTP Range are supported by a complete
-fallback download, so such operations may transfer the entire archive.
+not supported. Servers must provide valid HTTP Range responses; zget does not
+fall back to downloading the complete archive.
 .SH SEE ALSO
 .BR curl (1),
 .BR unzip (1),

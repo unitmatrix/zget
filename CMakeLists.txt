@@ -29,8 +29,8 @@ find_package(ZLIB REQUIRED)
 
 set(ZGET_LIBRARY_SOURCES
     src/zget.c src/error.c src/util.c src/source/source.c
-    src/source/http-parse.c src/source/http.c src/source/download.c
-    src/source/file.c src/format/format.c src/format/zip/zip.c
+    src/source/http-parse.c src/source/http.c
+    src/format/format.c src/format/zip/zip.c
     src/format/zip/zip-parse.c src/format/zip/extract.c)
 
 add_library(libzget SHARED ${ZGET_LIBRARY_SOURCES})
@@ -147,13 +147,12 @@ if(BUILD_TESTING)
             COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/integration.py
                     $<TARGET_FILE:zget>)
         set_tests_properties(integration_reference PROPERTIES TIMEOUT 90)
-        # Keep the no-Range behavior isolated: this small fixture makes the
-        # fallback contract obvious without coupling it to the large oracle.
-        add_test(NAME integration_no_range_fallback
+        # Keep the strict Range contract isolated from the large oracle.
+        add_test(NAME integration_strict_range
             COMMAND ${Python3_EXECUTABLE}
-                    ${CMAKE_CURRENT_SOURCE_DIR}/tests/no_range_fallback.py
+                    ${CMAKE_CURRENT_SOURCE_DIR}/tests/strict_range.py
                     $<TARGET_FILE:zget>)
-        set_tests_properties(integration_no_range_fallback PROPERTIES TIMEOUT 30)
+        set_tests_properties(integration_strict_range PROPERTIES TIMEOUT 30)
     endif()
     if(Python3_Interpreter_FOUND AND ZGET_BUILD_LARGE_TESTS)
         add_test(NAME integration_100k_entries
