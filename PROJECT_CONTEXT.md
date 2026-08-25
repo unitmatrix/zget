@@ -39,6 +39,23 @@ rules. Do not duplicate roadmap items or user-facing documentation.
 - Optimize discover-to-useful-result time to roughly 30 seconds and back the
   value proposition with reproducible measurements.
 
+## HTTP Range decisions
+
+- Do not require or trust `Accept-Ranges` as a prerequisite. Issue the actual
+  Range request and validate the response that the server returns.
+- A successful archive-data Range response must be `206 Partial Content` with a
+  valid `Content-Range` matching the requested interval and a usable total object
+  size.
+- `Content-Length` is optional for Range responses. Chunked or otherwise
+  length-unframed HTTP bodies are acceptable when the Range response itself is
+  valid.
+- The actual number of received body bytes must exactly match the requested
+  interval length. If `Content-Length` is present, it is an additional
+  consistency check and must agree with that expected body length.
+- A `200` response to a required Range request, malformed or inconsistent
+  `Content-Range`, contradictory `Content-Length`, or wrong actual body length is
+  an error. Do not turn any of these cases into a complete-download fallback.
+
 ## Benchmark decisions
 
 - Run the benchmark in GitHub Actions via a manually triggered workflow so no
