@@ -3,10 +3,10 @@
 This roadmap describes the project's current direction, not release commitments.
 Priorities may change as zget gains real-world usage and feedback.
 
-zget prioritizes completing the requested operation. Byte-range access is the
-preferred optimization, not a requirement: when a server cannot provide usable
-ranges, zget falls back to a safe complete download and continues through the
-same local source and archive implementation.
+zget has one primary purpose: fetch only a requested member from a remote archive
+without downloading the complete archive. Supplying `MEMBER` expresses that
+selective-access contract; if the server cannot provide the required byte ranges,
+the operation should fail rather than silently falling back to a full download.
 
 ## Recently completed
 
@@ -25,15 +25,13 @@ Released in 0.5.0.
 
 ### Graceful non-Range fallback
 
-Released in 0.4.0.
+Released in 0.4.0, but no longer aligned with the current minimal product goal.
 
 - Prefer HTTP Range when available.
-- Transparently fall back to a complete temporary download when a server ignores
+- 0.4.0 added a transparent complete-download fallback when a server ignored
   required Range requests.
-- Keep the fallback internal by using anonymous temporary storage and the normal
-  local-file source path.
-- Preserve normal extraction and listing behavior while documenting that the
-  fallback necessarily transfers the complete archive.
+- Current direction: remove that fallback so selective member retrieval never
+  silently downloads the entire archive.
 
 ### Installation and distribution
 
@@ -45,21 +43,16 @@ Released in 0.4.0.
 
 ## Next
 
-### Whole-resource retrieval
+### Restore strict selective member retrieval
 
-- Reframe zget as an archive-aware file getter: retrieve a complete HTTP(S)
-  resource, or select one file inside a supported remote container.
-- Accept `zget [-o FILE] URL [MEMBER]`; when `MEMBER` is omitted, stream a
-  direct complete GET without attempting archive parsing.
-- Extend `zget_get()` so a NULL member streams the complete resource, a
-  nonempty member preserves selective archive extraction, and an empty member
-  remains invalid. Keep the context/listing APIs archive-oriented.
-- Generalize the existing private complete-download implementation around a
-  callback sink shared by anonymous fallback storage and direct CLI output.
-- Preserve HTTP/status/redirect security and partial-output behavior while
-  keeping the feature intentionally smaller than a general curl replacement.
-- Update the CLI, public API documentation, README, `zget(1)`, and focused
-  regression coverage together. Target the semantic extension for 0.6.0.
+- Keep extraction syntax focused on `zget [-o FILE] URL MEMBER`.
+- Remove transparent complete-download fallback for member extraction.
+- If required HTTP Range access is unavailable, fail clearly instead of
+  downloading the full archive.
+- Do not add whole-resource retrieval (`zget URL`); use curl for that job.
+- Do not add `--range-only`, `--no-fallback`, or similar mode flags: providing
+  `MEMBER` already defines the selective behavior.
+- Update implementation, regression tests, README, and `zget(1)` together.
 
 ### Benchmark and prove the value proposition
 
@@ -74,33 +67,19 @@ Released in 0.4.0.
   measurable: zget should quickly demonstrate why fetching one member from a
   large remote archive is useful.
 
-### Remote archive queries
-
-- Add an exact-member `--stat` operation.
-- Add a script-friendly `--exists` operation with meaningful exit status.
-- Add machine-readable listing and stat output, with a streaming-friendly format
-  for listings.
-- Add glob filtering for `-l` and `-1` while preserving existing exact-match
-  semantics where they are already part of the public API.
-
-### Transfer visibility
-
-- Add an interactive progress meter for long downloads and extractions.
-- Keep stdout reserved for requested data; progress belongs on stderr.
-- Avoid interactive progress output when stderr is not a terminal.
-
 ## Planned
 
 ### Real-world adoption and feedback
 
 - Exercise zget against real large hosted ZIP workloads such as datasets,
   release/build artifacts, firmware archives, and object-storage/CDN content.
-- Use field feedback to prioritize compatibility and hardening work instead of
-  speculative features.
+- Let real usage determine whether any additional query, filtering, progress, or
+  format features are worth adding.
 
 ### Robustness and performance
 
-- Expand malformed ZIP/ZIP64 and non-Range fallback coverage.
+- Expand malformed ZIP/ZIP64 and strict Range-path coverage as real failures are
+  found.
 - Fuzz new parsing paths as they are introduced.
 - Benchmark archives with hundreds of thousands, millions, and larger entry
   counts as implementation changes warrant it.
@@ -113,14 +92,17 @@ Released in 0.4.0.
 
 ## Future formats
 
-Evaluate additional formats only when remote byte-range access provides a
-meaningful advantage. Likely candidates include:
+Evaluate additional formats only when selective remote byte-range access provides
+a demonstrated advantage. Likely candidates include:
 
 - ISO 9660
 - SquashFS
 
 Not currently planned:
 
+- whole-resource download mode
+- speculative `--stat`, `--exists`, globbing, or machine-readable query modes
+- interactive progress features without demonstrated demand
 - generic archive-manager functionality
 - FUSE/mount support
 - plugin frameworks or speculative component APIs
