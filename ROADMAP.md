@@ -54,6 +54,26 @@ Released in 0.4.0, but no longer aligned with the current minimal product goal.
   `MEMBER` already defines the selective behavior.
 - Update implementation, regression tests, README, and `zget(1)` together.
 
+### Minimize the public library API
+
+- Center the public API on one-shot streaming `zget_get(url, member, ...)` and
+  one-shot streaming `zget_list(url, ...)` operations.
+- Internalize options, global initialization, and context/open/close lifecycle;
+  remove those APIs from the public surface.
+- Keep `zget_error_string()` and `zget_version()` public; keep only error codes
+  that can actually be returned by the simplified public operations.
+- Keep extraction callback + `userdata` as the streaming output contract.
+- Simplify listing to whole-archive enumeration only, without an optional exact
+  member selector.
+- Make public listing metadata reflect useful raw Central Directory data:
+  name bytes + length, ZIP flags, DOS date/time, compressed/uncompressed sizes,
+  CRC32, and compression method. Avoid derived metadata flags and calendar
+  interpretation in the library API.
+- Do not expose external attributes unless a real use case appears.
+- Update headers, implementation, CLI adaptation, documentation, and focused API
+  tests together. This is a pre-1.0 API/ABI cleanup and belongs in the next minor
+  release rather than a 0.5.x patch.
+
 ### Benchmark and prove the value proposition
 
 - Keep benchmark execution deferred until it is explicitly resumed; the agreed
