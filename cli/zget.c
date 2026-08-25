@@ -23,6 +23,11 @@ struct list_output {
     int header_written;
 };
 
+struct utc_time {
+    int64_t year;
+    unsigned int month, day, hour, minute;
+};
+
 static int write_stream(struct file_output *out, const void *data, size_t size)
 {
     errno = 0;
@@ -91,40 +96,46 @@ static int write_list_header(struct list_output *out)
     return write_stream(&out->stream, header, sizeof(header) - 1);
 }
 
-static int utc_components(int64_t seconds, int64_t *year,
-                          unsigned int *month, unsigned int *day,
-                          unsigned int *hour, unsigned int *minute)
+/* Convert days since 1970-01-01 using the proleptic Gregorian calendar. */
+static void civil_from_days(int64_t days, struct utc_time *time)
 {
-    int64_t days = seconds / 86400;
-    int64_t remainder = seconds % 86400;
     int64_t z, era, year_of_era, day_of_year, month_prime;
 
-    if (remainder < 0) {
-        --days;
-        remainder += 86400;
-    }
     z = days + 719468;
     era = (z >= 0 ? z : z - 146096) / 146097;
     day_of_year = z - era * 146097;
     year_of_era = (day_of_year - day_of_year / 1460 +
                    day_of_year / 36524 - day_of_year / 146096) / 365;
-    *year = year_of_era + era * 400;
+    time->year = year_of_era + era * 400;
     day_of_year -= 365 * year_of_era + year_of_era / 4 - year_of_era / 100;
     month_prime = (5 * day_of_year + 2) / 153;
-    *day = (unsigned int)(day_of_year - (153 * month_prime + 2) / 5 + 1);
-    *month = (unsigned int)(month_prime + (month_prime < 10 ? 3 : -9));
-    *year += *month <= 2;
-    *hour = (unsigned int)(remainder / 3600);
-    *minute = (unsigned int)((remainder % 3600) / 60);
-    return *year >= 0 && *year <= 9999;
+    time->day = (unsigned int)(day_of_year -
+                               (153 * month_prime + 2) / 5 + 1);
+    time->month = (unsigned int)(month_prime +
+                                 (month_prime < 10 ? 3 : -9));
+    time->year += time->month <= 2;
+}
+
+static int utc_time_from_epoch(int64_t seconds, struct utc_time *time)
+{
+    int64_t days = seconds / 86400;
+    int64_t remainder = seconds % 86400;
+
+    if (remainder < 0) {
+        --days;
+        remainder += 86400;
+    }
+    civil_from_days(days, time);
+    time->hour = (unsigned int)(remainder / 3600);
+    time->minute = (unsigned int)((remainder % 3600) / 60);
+    return time->year >= 0 && time->year <= 9999;
 }
 
 static int list_member(void *opaque, const zget_member_info *member)
 {
     struct list_output *out = opaque;
+    struct utc_time time;
     char prefix[64];
-    int64_t year;
-    unsigned int month, day, hour, minute;
     int length;
 
     if (out->member != NULL &&
@@ -144,11 +155,12 @@ static int list_member(void *opaque, const zget_member_info *member)
 
     if (write_list_header(out))
         return 1;
-    if (utc_components(member->mtime, &year, &month, &day, &hour, &minute))
+    if (utc_time_from_epoch(member->mtime, &time))
         length = snprintf(prefix, sizeof(prefix),
                           "%9" PRIu64 "  %02u-%02u-%04" PRId64 " %02u:%02u   ",
                           member->uncompressed_size,
-                          month, day, year, hour, minute);
+                          time.month, time.day, time.year,
+                          time.hour, time.minute);
     else
         length = snprintf(prefix, sizeof(prefix),
                           "%9" PRIu64 "  ---------- -----   ",
