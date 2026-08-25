@@ -1,13 +1,13 @@
 # zget
 
-Fetch one file from a remote ZIP archive while downloading only the bytes needed when the server supports HTTP Range requests.
+Fetch one file from a remote ZIP archive without downloading the complete archive.
 
 `zget` is a command-line tool and C library for listing and extracting
-individual files from remote ZIP and ZIP64 archives. It prefers precise HTTP
-Range requests and transparently falls back to a complete temporary download
-when a server ignores Range requests entirely. It streams archive metadata with
-memory usage independent of entry count, so the same design works for ordinary
-archives and scales to very large ones.
+individual files from remote ZIP and ZIP64 archives using precise HTTP Range
+requests. If a server cannot provide the required ranges, zget fails rather
+than silently downloading the complete archive. It streams archive metadata
+with memory usage independent of entry count, so the same design works for
+ordinary archives and scales to very large ones.
 
 ```sh
 zget https://example.com/archive.zip README.txt
@@ -79,8 +79,8 @@ Remote ZIP access is not unique to zget. Python projects such as
 members over HTTP without downloading the whole archive when Range requests are
 available. `zget` is a native C library and CLI for efficient remote ZIP/ZIP64
 access. Its streaming, bounded-memory design works for ordinary archives and
-remains practical as archive sizes and entry counts grow, with predictable
-Range behavior and a compatibility fallback for servers that ignore Range.
+remains practical as archive sizes and entry counts grow, with a strict and
+predictable Range-access contract.
 
 `zget` streams the Central Directory, discards metadata for non-matching entries
 immediately, and can stop scanning as soon as the requested entry is found. It
@@ -101,18 +101,15 @@ for archives containing hundreds of thousands, millions, or tens of millions
 of entries; scan time and transferred metadata still depend on the target's
 position in the Central Directory.
 
-When the server supports Range requests, a successful lookup uses semantically
-precise byte ranges:
+A successful lookup uses semantically precise byte ranges:
 
 ```text
 tail -> central directory -> target local header -> target payload
 ```
 
-If the server ignores Range requests entirely and returns the complete object,
-zget downloads the archive once into anonymous temporary storage and continues
-through the same local source and ZIP implementation. The operation remains
-transparent to callers, but it necessarily transfers the whole archive and
-therefore loses the bandwidth advantage of Range-based access.
+If the server ignores a required Range request or otherwise cannot provide a
+valid partial response, zget fails with a Range or HTTP error. It never silently
+turns selective member retrieval into a complete archive download.
 
 The first exact Central Directory name match wins. Extraction is streamed
 through STORE or raw-DEFLATE decoding and checked against the entry CRC32.
@@ -323,10 +320,9 @@ the tail as an explicit interval. These extra requests count toward
 `max_http_requests`.
 
 If a server ignores the required Range request entirely and returns HTTP 200
-with the complete representation, zget falls back to one complete download in
-anonymous temporary storage and continues through the local-file source. This
-fallback preserves extraction and listing behavior, but it transfers the entire
-archive and does not provide Range-based bandwidth savings.
+with the complete representation, zget rejects the response with
+`ZGET_ERANGE`. Supplying `MEMBER` requests selective retrieval; zget never
+silently replaces it with a complete archive download.
 
 An inconsistent `Content-Range`, changed object size, non-identity
 `Content-Encoding`, or failed `If-Match` aborts the Range operation. HTTPS
@@ -349,7 +345,7 @@ write to stdout, which likewise cannot be rolled back after a late error.
   matching only when entirely ASCII; CP437 conversion is intentionally absent.
 - No encryption, split archives, resume, or random seeks within a DEFLATE
   member.
-- HTTP Range is preferred for efficient remote access. Servers that ignore
-  Range entirely are supported through a transparent complete-download fallback.
+- HTTP Range support is required. Servers that ignore required Range requests
+  fail with a Range error instead of triggering a complete download.
 
 This project is MIT licensed.
