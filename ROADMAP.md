@@ -62,20 +62,27 @@ Released in 0.4.0, but no longer aligned with the current minimal product goal.
   remove those APIs from the public surface.
 - Keep `zget_error_string()` and `zget_version()` public; keep only error codes
   that can actually be returned by the simplified public operations.
-- Keep extraction callback + `userdata` as the streaming output contract.
-- Simplify listing to whole-archive enumeration only, without an optional exact
-  member selector.
-- Make public listing metadata reflect useful Central Directory data at its
-  semantic type: NUL-terminated `const char *name` plus authoritative byte
-  length, ZIP flags, separate `zget_date` and `zget_time` modification values,
-  compressed/uncompressed sizes, CRC32, and compression method.
-- Do not convert or guess filename encoding; the terminator is C API convenience
-  and is not included in `name_length`.
+- Keep extraction callback + `userdata` as the streaming output contract; a
+  nonzero callback return aborts with `ZGET_ECALLBACK`.
+- Simplify library listing to whole-archive enumeration only, without an
+  optional exact member selector.
+- Public member names are valid UTF-8 and NUL-terminated. Resolve the ZIP name
+  using GP bit 11 UTF-8 first, then a usable Info-ZIP Unicode Path extra field
+  `0x7075`, then CP437-to-UTF-8 fallback. `name_length` is the byte length of the
+  exposed UTF-8 string and excludes the terminator.
+- `zget_get()` performs an exact case-sensitive match against the same resolved
+  UTF-8 names returned by `zget_list()`, without path or Unicode normalization.
+  If duplicate names exist, select the first matching Central Directory entry.
+- Make public listing metadata small and semantic: resolved name + length,
+  compressed/uncompressed sizes, CRC32, numeric compression method, and one
+  `int64_t mtime` Unix timestamp in UTC seconds.
+- Resolve `mtime` from NTFS extra field `0x000a` first, then Extended Timestamp
+  `0x5455`, then legacy DOS date/time interpreted as UTC. Discard NTFS
+  subsecond precision. Do not expose separate date/time structures or packed DOS
+  words.
+- Remove raw general-purpose ZIP flags and derived member flags from the public
+  metadata API.
 - Remove `struct_size` / `ZGET_MEMBER_INFO_V1_SIZE` from member metadata.
-- Do not expose packed DOS date/time words or invent timezone/DST/weekday
-  semantics; directly decode their defined calendar components.
-- Avoid derived metadata flags such as library-invented UTF-8/time-presence
-  flags when the underlying ZIP metadata already carries the relevant facts.
 - Do not expose external attributes unless a real use case appears.
 - Update headers, implementation, CLI adaptation, documentation, and focused API
   tests together. This is a pre-1.0 API/ABI cleanup and belongs in the next minor
