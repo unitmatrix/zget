@@ -66,15 +66,25 @@ rules. Do not duplicate roadmap items or user-facing documentation.
 - `zget_list()` lists the whole archive only. Do not give it an optional member
   selector; exact member extraction belongs to `zget_get()`.
 - Listing metadata should expose useful ZIP Central Directory data at its known
-  semantic type, without inventing information that ZIP does not contain. Keep
-  raw name bytes plus `name_length`, general-purpose flags, resolved
-  `compressed_size` and `uncompressed_size`, `crc32`, and `compression_method`.
+  semantic type, without inventing information that ZIP does not contain.
+- Represent member names as `const char *name` plus `size_t name_length`.
+  `name_length` is the authoritative byte length from ZIP and excludes the
+  terminator. libzget guarantees `name[name_length] == '\0'` for normal C API
+  convenience, but does not convert or guess the filename encoding.
+- Remove `struct_size` and `ZGET_MEMBER_INFO_V1_SIZE` from `zget_member_info`;
+  they are API-versioning machinery rather than archive metadata and are not
+  justified for this pre-1.0 minimal surface.
+- Keep general-purpose ZIP flags as a `uint16_t` bitmask, compression method as
+  its numeric `uint16_t` method ID, CRC32 as `uint32_t`, and resolved compressed
+  and uncompressed byte sizes as `uint64_t` values. Do not replace method IDs
+  with a closed enum that would prevent listing unknown methods.
 - Represent the DOS modification fields semantically rather than exposing their
   packed 16-bit encoding. Use separate public `zget_date { year, month, day }`
   and `zget_time { hour, minute, second }` types, stored as `modified_date` and
-  `modified_time` in `zget_member_info`. Do not use `struct tm`, `time_t`,
-  timezone, DST, weekday, or year-day fields because ZIP does not provide those
-  semantics.
+  `modified_time` in `zget_member_info`. Decode the ZIP bitfields directly;
+  do not convert to `struct tm`, `time_t`, timezone, DST, weekday, or year-day
+  semantics, and do not hide the decoded values behind a library-invented
+  validity/presence flag.
 - Do not expose derived `ZGET_MEMBER_NAME_UTF8` or
   `ZGET_MEMBER_HAS_MODIFIED_TIME` library-invented metadata flags. The CLI may
   interpret ZIP metadata for display.
@@ -151,6 +161,10 @@ rules. Do not duplicate roadmap items or user-facing documentation.
 - Add focused regression coverage with behavior changes and keep documentation
   synchronized with behavior.
 - Avoid speculative refactors and duplicated sources of truth.
+- Before recommending an API shape, data representation, or format-facing
+  behavior, first check the relevant standard and established industry/library
+  practice. Then recommend the smallest design that fits zget; do not invent a
+  custom convention when a well-established C/library convention already fits.
 - When a roadmap item is completed, reprioritized, added, dropped, or otherwise
   changes status, update `docs/roadmap:ROADMAP.md` in the same work session. Do
   not record a roadmap status change only in this context file.
