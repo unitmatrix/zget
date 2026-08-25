@@ -65,16 +65,22 @@ rules. Do not duplicate roadmap items or user-facing documentation.
   internalized.
 - `zget_list()` lists the whole archive only. Do not give it an optional member
   selector; exact member extraction belongs to `zget_get()`.
-- Listing metadata should expose useful ZIP Central Directory fields without
-  inventing higher-level interpretations: raw name bytes plus `name_length`, raw
-  general-purpose `flags`, raw DOS `modified_time` and `modified_date`, resolved
+- Listing metadata should expose useful ZIP Central Directory data at its known
+  semantic type, without inventing information that ZIP does not contain. Keep
+  raw name bytes plus `name_length`, general-purpose flags, resolved
   `compressed_size` and `uncompressed_size`, `crc32`, and `compression_method`.
-- Do not expose derived `ZGET_MEMBER_NAME_UTF8` /
-  `ZGET_MEMBER_HAS_MODIFIED_TIME` flags or decomposed calendar fields in the
-  public metadata structure. The CLI may interpret raw metadata for display.
+- Represent the DOS modification fields semantically rather than exposing their
+  packed 16-bit encoding. Use separate public `zget_date { year, month, day }`
+  and `zget_time { hour, minute, second }` types, stored as `modified_date` and
+  `modified_time` in `zget_member_info`. Do not use `struct tm`, `time_t`,
+  timezone, DST, weekday, or year-day fields because ZIP does not provide those
+  semantics.
+- Do not expose derived `ZGET_MEMBER_NAME_UTF8` or
+  `ZGET_MEMBER_HAS_MODIFIED_TIME` library-invented metadata flags. The CLI may
+  interpret ZIP metadata for display.
 - Do not add `external_attributes` to the public API without a demonstrated use
-  case. If needed later, prefer exposing the raw ZIP field before adding
-  platform-specific interpretation.
+  case. If needed later, expose the meaningful field with as little
+  platform-specific interpretation as possible.
 
 ## HTTP Range decisions
 
