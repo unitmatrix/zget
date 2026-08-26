@@ -3,10 +3,10 @@
 This roadmap describes the project's current direction, not release commitments.
 Priorities may change as zget gains real-world usage and feedback.
 
-zget is moving toward a transport-neutral ZIP range engine. The library should
-understand ZIP/ZIP64 structure and determine which byte ranges a caller needs,
-while the caller owns transport, storage, retries, authentication, caching, and
-payload handling.
+zget has one primary purpose: fetch a requested member from a remote ZIP archive
+without downloading the complete archive. Supplying `MEMBER` expresses that
+selective-access contract; if the server cannot provide the required byte ranges,
+the operation should fail rather than silently falling back to a full download.
 
 ## Recently completed
 
@@ -25,137 +25,116 @@ Released in 0.5.0.
 
 ### Graceful non-Range fallback
 
-Released in 0.4.0, but no longer aligned with the current product direction.
+Released in 0.4.0, but no longer aligned with the current minimal product goal.
 
+- Prefer HTTP Range when available.
 - 0.4.0 added a transparent complete-download fallback when a server ignored
   required Range requests.
-- Main later removed that fallback so selective access never silently downloads
-  the complete archive.
+- Current direction: keep that fallback removed so selective member retrieval
+  never silently downloads the entire archive.
+
+### Installation and distribution
+
+- Added concise installation guidance for release binaries.
+- Documented runtime dependencies and current Linux/macOS baselines.
+- Added a concrete Ubuntu 24.04 x86_64 installation example.
+- Keep distribution simple for now: use the existing versioned release archives
+  rather than adding installer scripts, extra release assets, taps, or packages.
 
 ### Restore strict selective member retrieval
 
-Completed on main after 0.5.0.
+Completed on main after 0.5.0 for the next minor release.
 
-- Removed transparent complete-download and local-file fallback paths from the
-  downloader-oriented implementation.
+- Removed the transparent complete-download and local-file fallback paths.
 - Required valid HTTP Range responses for extraction and listing.
-- Kept the CLI focused on exact member retrieval and explicit listing.
+- Kept the CLI focused on exact member retrieval and explicit listing without
+  adding whole-resource or range-policy modes.
+- Updated implementation, tests, README, and `zget(1)` together.
 
 ### Minimize the public library API
 
-Completed on main after 0.5.0, but now serves as the baseline for a further
-pre-1.0 redesign.
+Completed on main after 0.5.0 for the next minor release.
 
-- Reduced the public API to one-shot `zget_get()` and `zget_list()` operations.
+- Reduced the public API to one-shot streaming `zget_get()` and `zget_list()`
+  operations plus stable error text and runtime version reporting.
 - Internalized options, global initialization, and context lifecycle.
-- Added semantic UTF-8 member names and compact Central Directory metadata.
-- PR #39 made CLI listing whole-archive only.
+- Made listing names semantic UTF-8 through the ZIP UTF-8 flag, Info-ZIP
+  Unicode Path, or CP437 fallback, with exact extraction against those names.
+- Exposed compact Central Directory metadata with resolved sizes, CRC32,
+  numeric compression method, and UTC Unix modification time.
+- Updated the CLI, documentation, package consumers, and focused regression
+  coverage for the intentional pre-1.0 API/ABI break.
 
 ## Next
 
-### Transport-neutral public API
+### Real-world adoption and feedback
 
-Redesign libzget around one incremental caller-driven state machine.
+- Exercise zget against real large hosted ZIP workloads such as datasets,
+  release/build artifacts, firmware archives, and object-storage/CDN content.
+- Let real usage determine whether any additional query, filtering, progress, or
+  format features are worth adding.
+- Pay particular attention to interoperability with imperfect but common ZIP
+  producers, HTTP behavior in the wild, diagnostics, and slow-peer/timeout
+  behavior before adding new architecture.
 
-- Remove URL/HTTP/libcurl ownership from the public library contract.
-- Let the engine report the logical byte range it needs next; the caller fetches
-  or reads those bytes using its own transport/storage stack and provides them
-  back to libzget.
-- Support arbitrary transport chunking while preserving parser state across
-  fragments.
-- Exact lookup should stop Central Directory consumption as soon as the first
-  semantic name match is found, then resolve the local header and return payload
-  location/metadata.
-- Listing should use the same range/provide mechanism and emit entries
-  incrementally while walking the complete Central Directory.
-- Prefer pull-style state inspection over synchronous transport callbacks so the
-  same API fits both blocking clients such as libcurl and asynchronous hosts such
-  as Chromium.
-- Keep the central opaque state naming minimal (`zget`); finalize function names
-  only after checking established C-library practice.
+### Canonical C usage example
 
-### Make the CLI the canonical integration example
-
-- Refactor `zget` CLI to use only the public transport-neutral libzget path for
-  ZIP navigation and range planning.
-- Keep the integration intentionally small and idiomatic so snippets from
-  `cli/zget.c` can be quoted directly in the README as the recommended usage
-  example.
-- Keep libcurl in the CLI/reference adapter for HTTP Range requests and zlib in
-  the CLI/reference payload path for STORE/DEFLATE handling and CRC validation.
-- Do not give the CLI privileged internal shortcuts unavailable to third-party
-  consumers.
-
-### Rework tests around the new boundary
-
-- Add direct public-API tests for `process -> needed range -> provide -> process`.
-- Exercise fragmented range delivery, early Central Directory stop, missing
-  members, ZIP64, malformed metadata, and full-directory listing without any
-  HTTP dependency.
-- Preserve focused parser fuzzing.
-- Keep HTTP correctness tests around the CLI/reference libcurl adapter rather
-  than treating HTTP policy as a core libzget contract.
-
-## After the redesign
-
-### Real-world adoption and integration feedback
-
-- Exercise the range engine with more than one caller model, starting with the
-  reference libcurl CLI and at least one non-HTTP or asynchronous-style test
-  harness.
-- Test against real large hosted ZIP workloads such as datasets, build/release
-  artifacts, firmware archives, and object-storage/CDN content.
-- Let real integrations determine whether further API surface is justified.
+- Keep the CLI on the same public `zget_get()` / `zget_list()` API available to
+  third-party callers; do not give it privileged internal shortcuts.
+- Keep the extraction path in `cli/zget.c` simple enough that the actual
+  `zget_get()` callback usage can be quoted directly in the README as the
+  canonical library example.
+- Prefer showing real production code from the CLI over maintaining a separate
+  sample with subtly different behavior.
 
 ## Deferred
 
-### Exact member metadata-oriented convenience
+### Exact member metadata lookup
 
-- The transport-neutral exact lookup naturally returns payload location and
-  member metadata without downloading the payload.
-- Do not add separate `stat`/`exists` style APIs unless a concrete consumer needs
-  additional convenience beyond that core lookup result.
-
-### Small bounded semantic results
-
-- Do not require streaming merely for consistency when a result is naturally
-  small and bounded.
-- No special public EOCD-return API is planned now. Revisit whole-value exposure
-  for EOCD or other bounded structures only if a concrete integration benefits
-  from it.
+- Consider an optional exact-member metadata convenience only if a real need
+  appears to inspect one member without downloading its payload.
+- Prefer reusing the existing streaming Central Directory parser and early-stop
+  behavior over introducing speculative `stat`/`exists` APIs.
+- Do not add it solely for API completeness.
 
 ### Benchmark and prove the value proposition
 
-- Keep benchmark execution deferred until the transport-neutral redesign lands.
-- Revisit the old benchmark design before running it; it was built around the
-  downloader-oriented API.
-- Measure the new engine's useful properties: metadata bytes required before a
-  member is located, early-stop savings by Central Directory position, memory,
-  processing overhead, and integration cost.
+- Keep benchmark execution deferred until it is explicitly resumed; the agreed
+  downloader-oriented benchmark design remains applicable.
+- Add reproducible benchmarks for representative large remote ZIP workloads.
+- Measure transferred bytes, memory use, time to first result, and total time for
+  targets at different positions in the Central Directory.
+- Compare with conventional full-download workflows and similar remote-ZIP tools
+  where workloads are equivalent and the comparison is fair.
+- Use the results to make the README's opening value proposition concrete and
+  measurable.
 
 ## Planned
 
 ### Robustness and performance
 
-- Expand malformed ZIP/ZIP64 coverage as real failures are found.
-- Fuzz new parser/state-machine paths as they are introduced.
-- Exercise archives with hundreds of thousands, millions, and larger entry
-  counts when implementation changes warrant it.
+- Expand malformed ZIP/ZIP64 and strict Range-path coverage as real failures are
+  found.
+- Fuzz new parsing paths as they are introduced.
+- Benchmark archives with hundreds of thousands, millions, and larger entry
+  counts as implementation changes warrant it.
 
 ### Distribution maturity
 
 - Keep upstream builds, installs, metadata, and releases friendly to Linux
   distribution maintainers.
-- Pursue broader distribution inclusion after the new API has field testing.
+- Pursue broader distribution inclusion after further field testing.
 
 ## Future formats
 
-Stay ZIP-focused for now. Evaluate additional formats only when selective remote
-byte-range access provides a demonstrated advantage and the core abstraction has
-proved reusable in practice.
+Evaluate additional formats only when selective remote byte-range access provides
+a demonstrated advantage. Do not generalize libzget into a format framework in
+advance of a real second-format use case.
 
 Not currently planned:
 
+- public transport-neutral range-engine/state-machine API
+- generic range-driven file-format framework
 - whole-resource download mode
 - speculative `--stat`, `--exists`, globbing, or machine-readable query modes
 - interactive progress features without demonstrated demand
