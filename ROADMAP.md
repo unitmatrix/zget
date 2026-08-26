@@ -25,13 +25,13 @@ Released in 0.5.0.
 
 ### Graceful non-Range fallback
 
-Released in 0.4.0, but no longer aligned with the current minimal product goal.
+Released in 0.4.0, then removed in 0.6.0 to restore the strict selective-access
+contract.
 
-- Prefer HTTP Range when available.
 - 0.4.0 added a transparent complete-download fallback when a server ignored
   required Range requests.
-- Current direction: keep that fallback removed so selective member retrieval
-  never silently downloads the entire archive.
+- 0.6.0 removed that path so selective member retrieval never silently downloads
+  the entire archive.
 
 ### Installation and distribution
 
@@ -43,7 +43,7 @@ Released in 0.4.0, but no longer aligned with the current minimal product goal.
 
 ### Restore strict selective member retrieval
 
-Completed on main after 0.5.0 for the next minor release.
+Released in 0.6.0.
 
 - Removed the transparent complete-download and local-file fallback paths.
 - Required valid HTTP Range responses for extraction and listing.
@@ -53,7 +53,7 @@ Completed on main after 0.5.0 for the next minor release.
 
 ### Minimize the public library API
 
-Completed on main after 0.5.0 for the next minor release.
+Released in 0.6.0.
 
 - Reduced the public API to one-shot streaming `zget_get()` and `zget_list()`
   operations plus stable error text and runtime version reporting.
@@ -64,6 +64,15 @@ Completed on main after 0.5.0 for the next minor release.
   numeric compression method, and UTC Unix modification time.
 - Updated the CLI, documentation, package consumers, and focused regression
   coverage for the intentional pre-1.0 API/ABI break.
+
+### Canonical C usage example
+
+Completed in PR #41 and released in 0.6.0.
+
+- The CLI remains on the same public `zget_get()` / `zget_list()` API available
+  to third-party callers; it has no privileged internal shortcut.
+- README now quotes the real `cli/zget.c` extraction path as the canonical
+  library example instead of maintaining a separate toy implementation.
 
 ## Next
 
@@ -76,16 +85,8 @@ Completed on main after 0.5.0 for the next minor release.
 - Pay particular attention to interoperability with imperfect but common ZIP
   producers, HTTP behavior in the wild, diagnostics, and slow-peer/timeout
   behavior before adding new architecture.
-
-### Canonical C usage example
-
-- Keep the CLI on the same public `zget_get()` / `zget_list()` API available to
-  third-party callers; do not give it privileged internal shortcuts.
-- Keep the extraction path in `cli/zget.c` simple enough that the actual
-  `zget_get()` callback usage can be quoted directly in the README as the
-  canonical library example.
-- Prefer showing real production code from the CLI over maintaining a separate
-  sample with subtly different behavior.
+- Do not assign the next minor version or plan another public API expansion until
+  real usage gives a concrete reason.
 
 ## Deferred
 
