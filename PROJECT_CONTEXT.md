@@ -10,17 +10,14 @@ rules. Do not duplicate roadmap items or user-facing documentation.
 
 ## Current state
 
-- Latest release: `0.5.0`.
+- Latest release: `0.6.0`.
+- Release `0.6.0` contains the restored strict selective-access contract, the
+  minimal one-shot public library API, semantic UTF-8 ZIP member names and
+  metadata, and whole-archive `zget_list()` / CLI `-l` / `-1` listing behavior.
 - `VERSION` is the single source of truth for the project version. Do not add
   manually synchronized version literals to tests or build plumbing.
-- Release 0.5.0 still contains the transparent complete-download fallback added
-  in 0.4.0. Main removed that fallback in PR #36 and now requires selective
-  byte-range access for extraction and listing.
-- Main adopted the minimal one-shot public library API and semantic ZIP member
-  names and metadata in PR #37. This intentional API/ABI break is unreleased and
-  belongs in the next minor release, not a 0.5.x patch.
-- PR #39 removed exact-member filtering from CLI listing; `-l` / `-1` list the
-  whole archive.
+- The canonical C extraction example in README now quotes the same public
+  `zget_get()` path used by `cli/zget.c` (PR #41).
 
 ## Product direction
 
@@ -205,8 +202,10 @@ rules. Do not duplicate roadmap items or user-facing documentation.
 
 - libzget remains pre-1.0: minor releases may intentionally revise API/ABI; patch
   releases preserve the ABI of their minor line.
-- The main-branch API after PR #37 is still unreleased and belongs in the next
-  minor release, not a 0.5.x patch.
+- Release `0.6.0` is the first released line containing the minimal one-shot API
+  adopted in PR #37.
+- Do not assign the next minor version or plan another API break without a
+  concrete reason from real usage.
 
 ## Authoritative project sources
 
