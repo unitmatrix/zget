@@ -76,6 +76,32 @@ Completed in PR #41 and released in 0.6.0.
 
 ## Next
 
+### Migrate ZIP parsing to minizip-ng
+
+- Integrate minizip-ng as the selected ZIP library through the low-level `mz_zip`
+  API without changing the public zget API.
+- Keep HTTP Range transport owned by zget; minizip-ng should operate through a
+  private zget stream/source adapter rather than perform network access itself.
+- Accept minizip-ng ZIP semantics rather than preserving zget-specific handling
+  rules for individual extra fields such as `0x7075` or `0x5455`.
+- Preserve selective-access efficiency during the migration:
+  - one member payload is fetched by exactly one HTTP Range request;
+  - the Central Directory is consumed through one forward Range request with
+    early-stop lookup;
+  - Central Directory memory stays O(1) with respect to directory size and entry
+    count;
+  - no replay buffer may grow with the Central Directory; only a small fixed
+    replay window needed by the `mz_zip` access pattern is acceptable;
+  - EOCD/tail access is served from a fixed-size tail buffer.
+- Account for the confirmed `mz_zip` access pattern where `mz_zip_open()` reads
+  the four-byte Central Directory signature and `goto_first()` seeks back to the
+  start of the Central Directory.
+- In the first stage, let minizip-ng own ZIP/ZIP64/Central Directory/local-header
+  parsing while the existing zlib path may continue to provide streaming
+  decompression and CRC validation.
+- Treat HTTP request count and memory behavior no worse than current zget as the
+  migration acceptance criterion.
+
 ### Real-world adoption and feedback
 
 - Exercise zget against real large hosted ZIP workloads such as datasets,
@@ -84,7 +110,7 @@ Completed in PR #41 and released in 0.6.0.
   format features are worth adding.
 - Pay particular attention to interoperability with imperfect but common ZIP
   producers, HTTP behavior in the wild, diagnostics, and slow-peer/timeout
-  behavior before adding new architecture.
+  behavior while validating the minizip-ng migration.
 - Do not assign the next minor version or plan another public API expansion until
   real usage gives a concrete reason.
 
@@ -94,7 +120,7 @@ Completed in PR #41 and released in 0.6.0.
 
 - Consider an optional exact-member metadata convenience only if a real need
   appears to inspect one member without downloading its payload.
-- Prefer reusing the existing streaming Central Directory parser and early-stop
+- Prefer reusing the streaming Central Directory traversal and early-stop
   behavior over introducing speculative `stat`/`exists` APIs.
 - Do not add it solely for API completeness.
 
