@@ -73,20 +73,14 @@ rules. Do not duplicate roadmap items or user-facing documentation.
 - Listing metadata should expose useful ZIP Central Directory data at its known
   semantic type, without requiring callers to understand incidental ZIP
   machinery.
-- Public member names are valid UTF-8, NUL-terminated strings represented as
-  `const char *name` plus `size_t name_length`; `name_length` is the byte length
-  of the exposed UTF-8 string and excludes the terminator. Resolve names in this
-  order: GP bit 11 UTF-8 first; otherwise a usable Info-ZIP Unicode Path extra
-  field `0x7075` (version 1, matching CRC32, valid UTF-8); otherwise CP437 to
-  UTF-8. Embedded NUL in the selected name is malformed ZIP. An unusable
-  `0x7075` is ignored and falls back to the standard-name path; a structurally
-  malformed overall extra-field block is `ZGET_EZIP`.
-- `zget_get()` accepts a NUL-terminated valid UTF-8 member name and performs an
-  exact case-sensitive comparison against the same resolved semantic UTF-8 name
-  exposed by `zget_list()`. Do not normalize paths or Unicode, translate slash
-  styles, apply locale behavior, or impose the raw ZIP 65535-byte filename limit
-  on the resolved UTF-8 input. A name returned by listing should be directly
-  usable with `zget_get()`.
+- The public API shape stays unchanged during the minizip-ng migration. ZIP name,
+  timestamp, and extra-field interpretation should follow minizip-ng semantics as
+  provided by the low-level `mz_zip` API. Do not retain zget-specific semantic
+  overrides for Info-ZIP Unicode Path `0x7075`, Extended Timestamp `0x5455`, or
+  similar ZIP details merely to preserve the old in-project parser behavior.
+- `zget_get()` continues to perform exact member selection using the member name
+  exposed through the chosen ZIP semantics. Do not add path normalization,
+  Unicode normalization, slash translation, or locale-dependent matching.
 - If multiple Central Directory entries resolve to the same member name,
   `zget_get()` selects the first matching entry in Central Directory order.
   `zget_list()` still emits every entry. This preserves streaming early-stop
@@ -96,10 +90,9 @@ rules. Do not duplicate roadmap items or user-facing documentation.
 - Do not expose raw general-purpose ZIP flags or library-invented derived member
   flags. Keep compression method as numeric `uint16_t`, CRC32 as `uint32_t`, and
   resolved compressed and uncompressed byte sizes as `uint64_t`.
-- Represent modification time as one public `int64_t mtime`: Unix timestamp
-  seconds since 1970-01-01 UTC. Resolve it in priority order: NTFS extra field
-  `0x000a`, then Extended Timestamp `0x5455`, then legacy DOS date/time
-  interpreted as UTC. NTFS subsecond precision is intentionally discarded.
+- Keep the public `int64_t mtime` representation as Unix timestamp seconds since
+  1970-01-01 UTC; derive it through minizip-ng rather than maintaining a separate
+  zget-specific `0x5455`/NTFS/DOS timestamp precedence implementation.
 - Do not expose `external_attributes` without a demonstrated use case.
 - Keep `ZGET_API` visibility plumbing and generated version macros; they are
   normal build/ABI infrastructure, not functional API bloat.
@@ -108,17 +101,29 @@ rules. Do not duplicate roadmap items or user-facing documentation.
 
 - Keep transport independence as an internal implementation boundary, not a
   public product contract.
-- The ZIP/format layer should depend on the private source abstraction for sparse
-  byte access; it should not call libcurl directly.
-- The HTTP source owns HTTP/libcurl behavior and satisfies the private range-read
-  contract. This separation keeps ZIP parsing unit-testable and fuzzable without
-  forcing transport concerns into format code.
-- The Central Directory parser remains incremental, bounded-memory, and able to
-  stop source consumption as soon as the first exact match is found.
-- Keep the small in-project ZIP/Central Directory parser and zlib extraction
-  path. The investigation of libzip, classic MiniZip, minizip-ng, miniz,
-  libarchive, and zziplib as replacement ZIP dependencies is closed unless the
-  direction is explicitly reopened.
+- HTTP Range remains zget's responsibility. minizip-ng must not own HTTP access or
+  change the public transport contract.
+- Use minizip-ng as the selected ZIP library, specifically the low-level `mz_zip`
+  API, for ZIP/ZIP64, Central Directory, and local-header parsing.
+- The ZIP layer should consume zget's private source/stream adapter rather than
+  call libcurl directly.
+- Preserve selective-access efficiency as an architectural invariant: fetching
+  one member payload must require exactly one HTTP Range request for that payload.
+- Read the Central Directory through one forward HTTP Range request and retain
+  early-stop lookup. Memory used while scanning the Central Directory must remain
+  O(1) with respect to Central Directory size and entry count.
+- Do not introduce a replay buffer that grows with the Central Directory. A small
+  fixed replay window is allowed only to satisfy minizip-ng's access pattern.
+  Confirmed behavior to support: `mz_zip_open()` reads the four-byte Central
+  Directory signature, then `goto_first()` seeks back to the beginning of the
+  Central Directory.
+- Serve EOCD/tail access from a fixed-size tail buffer.
+- In the first migration stage, decompression and CRC streaming may remain on the
+  existing zlib path while minizip-ng owns ZIP/ZIP64/CD/local-header parsing.
+- Migration acceptance criterion: HTTP request count and memory behavior must be
+  no worse than current zget.
+- The earlier decision to keep the in-project ZIP/Central Directory parser and to
+  treat the minizip-ng investigation as closed is superseded by this decision.
 
 ## HTTP Range decisions
 
