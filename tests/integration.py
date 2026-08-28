@@ -560,11 +560,16 @@ def main(binary):
         assert extracted.stdout == b"hello"
     run_server(bytes(legacy_name), "normal", legacy_listing)
 
+    # A non-UTC process timezone ensures localtime() could not accidentally
+    # satisfy the UTC listing assertions below.
+    timestamp_environment = dict(os.environ, TZ="UTC-2")
+
     def semantic_metadata(base):
         """Prefer valid Unicode Path and NTFS mtime over all fallbacks."""
         url = base + "/archive.zip"
         listed = subprocess.run([binary, "-l", url], check=True,
-                                stdout=subprocess.PIPE).stdout
+                                stdout=subprocess.PIPE,
+                                env=timestamp_environment).stdout
         assert b"01-01-2030 00:00   preferred.txt" in listed
         extracted = subprocess.run([binary, url, "preferred.txt"], check=True,
                                    stdout=subprocess.PIPE).stdout
@@ -574,7 +579,8 @@ def main(binary):
     def extended_timestamp(base):
         """Use Extended Timestamp when NTFS mtime is absent."""
         listed = subprocess.run([binary, "-l", base + "/archive.zip"],
-                                check=True, stdout=subprocess.PIPE).stdout
+                                check=True, stdout=subprocess.PIPE,
+                                env=timestamp_environment).stdout
         assert b"09-09-2001 01:46   preferred.txt" in listed
     run_server(semantic_archive(include_ntfs=False), "normal",
                extended_timestamp)
@@ -582,7 +588,8 @@ def main(binary):
     def negative_timestamp(base):
         """Preserve signed Extended Timestamp values before the Unix epoch."""
         listed = subprocess.run([binary, "-l", base + "/archive.zip"],
-                                check=True, stdout=subprocess.PIPE).stdout
+                                check=True, stdout=subprocess.PIPE,
+                                env=timestamp_environment).stdout
         assert b"12-31-1969 23:59   preferred.txt" in listed
     run_server(semantic_archive(include_ntfs=False, extended_value=-1),
                "normal", negative_timestamp)
